@@ -1,7 +1,14 @@
 {
   "name": "cladm",
+  "version": "0.1.0",
+  "description": "TUI launcher for Claude Code sessions",
   "module": "index.ts",
   "type": "module",
+  "bin": {
+    "cladm": "src/index.ts"
+  },
+  "keywords": ["claude", "claude-code", "tui", "terminal", "launcher", "bun"],
+  "license": "MIT",
   "devDependencies": {
     "@types/bun": "latest"
   },
