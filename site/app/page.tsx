@@ -1,5 +1,19 @@
 import Image from "next/image";
 import { EmailReveal } from "./email-reveal";
+import {
+  SearchIcon,
+  GithubIcon,
+  TerminalIcon,
+  FolderIcon,
+  NetworkIcon,
+  GamepadIcon,
+  BlocksIcon,
+  ArrowRightIcon,
+  ExternalLinkIcon,
+  LinkedinIcon,
+  MailIcon,
+  SpaceInvadersIcon,
+} from "raster-react";
 
 function PixelDivider() {
   return (
@@ -50,13 +64,13 @@ function FeatureBlock({
   title,
   desc,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   desc: string;
 }) {
   return (
     <div className="border-2 border-border p-5 bg-surface hover:border-accent transition-colors group">
-      <div className="font-[family-name:var(--font-pixel)] text-2xl mb-2 group-hover:text-accent transition-colors">
+      <div className="mb-3 text-dim group-hover:text-accent transition-colors">
         {icon}
       </div>
       <h3 className="font-[family-name:var(--font-pixel)] text-accent text-sm mb-2 uppercase tracking-wider">
@@ -87,15 +101,17 @@ export default function Home() {
         <div className="relative max-w-5xl mx-auto px-6 pt-16 pb-20">
           {/* Nav */}
           <nav className="flex items-center justify-between mb-20">
-            <div className="font-[family-name:var(--font-pixel)] text-accent text-lg tracking-widest">
+            <div className="font-[family-name:var(--font-pixel)] text-accent text-lg tracking-widest flex items-center gap-2">
+              <SpaceInvadersIcon size={20} />
               CLADM
             </div>
             <a
               href="https://github.com/alezmad/cladm"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-[family-name:var(--font-mono)] text-dim text-xs border-2 border-border px-4 py-2 hover:border-accent hover:text-accent transition-colors uppercase tracking-wider"
+              className="font-[family-name:var(--font-mono)] text-dim text-xs border-2 border-border px-4 py-2 hover:border-accent hover:text-accent transition-colors uppercase tracking-wider flex items-center gap-2"
             >
+              <GithubIcon size={16} />
               GitHub
             </a>
           </nav>
@@ -244,32 +260,32 @@ export default function Home() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <FeatureBlock
-            icon=">"
+            icon={<SearchIcon size={28} />}
             title="AUTO-DISCOVERY"
             desc="Reads ~/.claude/history.jsonl to find every project you've used with Claude Code. No config needed."
           />
           <FeatureBlock
-            icon="#"
+            icon={<NetworkIcon size={28} />}
             title="GIT METADATA"
             desc="Branch, sync status (ahead/behind), last commit, dirty state — all loaded in parallel."
           />
           <FeatureBlock
-            icon="{"
+            icon={<FolderIcon size={28} />}
             title="SESSION BROWSER"
             desc="Expand any project to browse past sessions. See conversation previews and resume directly."
           />
           <FeatureBlock
-            icon="*"
+            icon={<ArrowRightIcon size={28} />}
             title="BRANCH SWITCHING"
             desc="Select a non-current branch to launch Claude with an auto-prompt to switch and stash."
           />
           <FeatureBlock
-            icon="+"
+            icon={<TerminalIcon size={28} />}
             title="PARALLEL LAUNCH"
             desc="Select multiple projects and hit Enter. Each opens in a new Terminal.app window simultaneously."
           />
           <FeatureBlock
-            icon="@"
+            icon={<BlocksIcon size={28} />}
             title="STACK DETECTION"
             desc="Auto-detects project stack: TypeScript, Python, Rust, Go, Docker, and more from config files."
           />
@@ -443,21 +459,23 @@ export default function Home() {
           <div className="font-[family-name:var(--font-pixel)] text-text text-lg mb-4">
             Alejandro Mourente
           </div>
-          <div className="flex items-center justify-center gap-5 font-[family-name:var(--font-mono)] text-xs">
+          <div className="flex items-center justify-center gap-6 font-[family-name:var(--font-mono)] text-xs">
             <a
               href="https://github.com/alezmad"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-dim hover:text-accent transition-colors"
+              className="text-dim hover:text-accent transition-colors flex items-center gap-1.5"
             >
+              <GithubIcon size={14} />
               github
             </a>
             <a
               href="https://www.linkedin.com/in/alejandro-mourente/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-dim hover:text-accent transition-colors"
+              className="text-dim hover:text-accent transition-colors flex items-center gap-1.5"
             >
+              <LinkedinIcon size={14} />
               linkedin
             </a>
             <EmailReveal />

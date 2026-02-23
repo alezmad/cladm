@@ -6,6 +6,7 @@
       "name": "site",
       "dependencies": {
         "next": "16.1.6",
+        "raster-react": "^0.2.0",
         "react": "19.2.3",
         "react-dom": "19.2.3",
       },
@@ -709,6 +710,8 @@
     "punycode": ["punycode@2.3.1", "", {}, "sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg=="],
 
     "queue-microtask": ["queue-microtask@1.2.3", "", {}, "sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A=="],
+
+    "raster-react": ["raster-react@0.2.0", "", { "peerDependencies": { "react": ">=16.8.0" } }, "sha512-Lp0qDHfKIfXXYiNSOIZilh6pLV3TwJWNWNuRFpYM4/acIJfKJhoE+lRsvCSefLaQ56EQ6JJFLRVV/n1jbQJSEw=="],
 
     "react": ["react@19.2.3", "", {}, "sha512-Ku/hhYbVjOQnXDZFv2+RibmLFGwFdeeKHFcOTlrt7xplBnya5OGn/hIRDsqDiSUcfORsDC7MPxwork8jBwsIWA=="],
 
