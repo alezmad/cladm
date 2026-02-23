@@ -98,7 +98,11 @@ Select a branch to launch Claude with a prompt to switch to that branch. Select 
 
 ## What gets launched
 
-Each selected project opens a new Terminal.app window running:
+Each selected project opens a new Terminal.app window running Claude Code:
+
+<p align="center">
+  <img src="assets/claude-terminal.webp" alt="Claude Code session in Terminal" width="700" />
+</p>
 
 ```bash
 cd /path/to/project && claude --dangerously-skip-permissions

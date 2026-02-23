@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: #0f0f0f;
+  --color-surface: #1a1a1a;
+  --color-surface-2: #222222;
+  --color-border: #333333;
+  --color-accent: #e07850;
+  --color-accent-dark: #c45e3a;
+  --color-text: #e8e8e8;
+  --color-dim: #777777;
+  --color-green: #73daca;
+  --color-yellow: #e0af68;
+  --color-cyan: #7dcfff;
+  --color-magenta: #bb9af7;
+  --font-pixel: "Silkscreen", monospace;
+  --font-mono: "JetBrains Mono", "Geist Mono", monospace;
+}
+
+body {
+  background: #0f0f0f;
+  color: #e8e8e8;
+}
+
+/* Pixel-perfect rendering */
+.pixel-render {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+/* Brutalist scrollbar */
+::-webkit-scrollbar { width: 12px; }
+::-webkit-scrollbar-track { background: #0f0f0f; border-left: 3px solid #333; }
+::-webkit-scrollbar-thumb { background: #e07850; border: 3px solid #0f0f0f; }
+
+/* Scanline overlay */
+.scanlines {
+  position: relative;
+}
+.scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Pixel border using box-shadow */
+.pixel-border {
+  box-shadow:
+    4px 0 0 0 #333, -4px 0 0 0 #333,
+    0 4px 0 0 #333, 0 -4px 0 0 #333,
+    4px 4px 0 0 #333, -4px 4px 0 0 #333,
+    4px -4px 0 0 #333, -4px -4px 0 0 #333;
+}
+.pixel-border-accent {
+  box-shadow:
+    4px 0 0 0 #e07850, -4px 0 0 0 #e07850,
+    0 4px 0 0 #e07850, 0 -4px 0 0 #e07850,
+    4px 4px 0 0 #e07850, -4px 4px 0 0 #e07850,
+    4px -4px 0 0 #e07850, -4px -4px 0 0 #e07850;
+}
+
+/* Blinking cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.cursor-blink { animation: blink 1s step-end infinite; }
+
+/* Float for mascots */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+.float { animation: float 3s ease-in-out infinite; }
+.float-delay { animation: float 3s ease-in-out 0.7s infinite; }
+.float-delay-2 { animation: float 3s ease-in-out 1.4s infinite; }
+
+/* Key cap */
+.keycap {
+  display: inline-block;
+  padding: 1px 7px;
+  background: #1a1a1a;
+  border: 2px solid #333;
+  border-bottom-width: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: #e8e8e8;
+}
