@@ -1,4 +1,4 @@
-# tui-claude-director
+# cladm
 
 To install dependencies:
 

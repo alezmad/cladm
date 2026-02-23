@@ -1,8 +1,7 @@
 {
-  "name": "tui-claude-director",
+  "name": "cladm",
   "module": "index.ts",
   "type": "module",
-  "private": true,
   "devDependencies": {
     "@types/bun": "latest"
   },
