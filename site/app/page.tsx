@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { EmailReveal } from "./email-reveal";
+import { TerminalCascade } from "./terminal-cascade";
 import {
   SearchIcon,
   GithubIcon,
@@ -98,9 +99,9 @@ export default function Home() {
           }}
         />
 
-        <div className="relative max-w-5xl mx-auto px-6 pt-16 pb-20">
+        <div className="relative max-w-6xl mx-auto px-6 pt-16 pb-20">
           {/* Nav */}
-          <nav className="flex items-center justify-between mb-20">
+          <nav className="flex items-center justify-between mb-16">
             <div className="font-[family-name:var(--font-pixel)] text-accent text-lg tracking-widest flex items-center gap-2">
               <SpaceInvadersIcon size={20} />
               CLADM
@@ -116,46 +117,54 @@ export default function Home() {
             </a>
           </nav>
 
-          {/* Hero content */}
-          <div className="flex flex-col items-center text-center">
-            <Image
-              src="/logo.png"
-              alt="cladm pixel art logo"
-              width={320}
-              height={213}
-              className="pixel-render float mb-8"
-              priority
-            />
+          {/* Two-column hero */}
+          <div className="flex flex-col lg:flex-row items-center gap-12 lg:gap-16">
+            {/* Left — text + CTA */}
+            <div className="flex-1 flex flex-col items-center lg:items-start text-center lg:text-left">
+              <Image
+                src="/logo.png"
+                alt="cladm pixel art logo"
+                width={240}
+                height={160}
+                className="pixel-render float mb-6"
+                priority
+              />
 
-            <h1 className="font-[family-name:var(--font-pixel)] text-4xl md:text-5xl text-text mb-4 leading-tight">
-              CLADM
-            </h1>
+              <h1 className="font-[family-name:var(--font-pixel)] text-4xl md:text-5xl text-text mb-4 leading-tight">
+                CLADM
+              </h1>
 
-            <p className="font-[family-name:var(--font-pixel)] text-accent text-lg md:text-xl mb-6">
-              TUI LAUNCHER FOR CLAUDE CODE
-            </p>
+              <p className="font-[family-name:var(--font-pixel)] text-accent text-lg md:text-xl mb-5">
+                TUI LAUNCHER FOR CLAUDE CODE
+              </p>
 
-            <p className="font-[family-name:var(--font-mono)] text-dim text-sm max-w-xl leading-relaxed mb-10">
-              Browse all your projects. See git status at a glance. Expand into
-              sessions and branches. Launch everything in parallel Terminal
-              windows.
-            </p>
+              <p className="font-[family-name:var(--font-mono)] text-dim text-sm max-w-md leading-relaxed mb-8">
+                Browse all your projects. See git status at a glance. Expand
+                into sessions and branches. Launch everything in parallel
+                Terminal windows.
+              </p>
 
-            {/* Install command */}
-            <div className="pixel-border-accent bg-surface px-8 py-4 mb-6">
-              <code className="font-[family-name:var(--font-mono)] text-green text-sm">
-                <span className="text-dim">$</span> bun install -g cladm
-                <span className="cursor-blink text-accent">_</span>
-              </code>
+              {/* Install command */}
+              <div className="pixel-border-accent bg-surface px-8 py-4 mb-4">
+                <code className="font-[family-name:var(--font-mono)] text-green text-sm">
+                  <span className="text-dim">$</span> bun install -g cladm
+                  <span className="cursor-blink text-accent">_</span>
+                </code>
+              </div>
+
+              <p className="font-[family-name:var(--font-mono)] text-dim text-xs">
+                requires{" "}
+                <a href="https://bun.sh" className="text-accent hover:underline">
+                  bun
+                </a>{" "}
+                &gt;= 1.3 + macOS
+              </p>
             </div>
 
-            <p className="font-[family-name:var(--font-mono)] text-dim text-xs mb-16">
-              requires{" "}
-              <a href="https://bun.sh" className="text-accent hover:underline">
-                bun
-              </a>{" "}
-              &gt;= 1.3 + macOS
-            </p>
+            {/* Right — terminal cascade */}
+            <div className="flex-1 w-full max-w-xl">
+              <TerminalCascade />
+            </div>
           </div>
         </div>
 
