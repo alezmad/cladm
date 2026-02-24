@@ -267,14 +267,17 @@ export interface IdleSessionInfo {
 }
 
 export function getIdleSessions(projects: Project[]): IdleSessionInfo[] {
-  const idle: IdleSessionInfo[] = []
+  // Deduplicate by project+sessionFile — multiple processes in same CWD share one sessionFile
+  const seen = new Map<string, IdleSessionInfo>()
   for (const project of projects) {
     const sessions = sessionsByPath.get(project.path)
     if (!sessions) continue
     for (const s of sessions) {
       if (s.busy) continue
       if (!s.lastActivityMs) continue
-      // Find matching session info for title/prompt
+      const dedupeKey = `${project.path}:${s.sessionFile || s.pid}`
+      const existing = seen.get(dedupeKey)
+      if (existing && existing.idleSinceMs >= s.lastActivityMs) continue
       let title = ""
       let lastPrompt = ""
       let lastResponse = ""
@@ -288,7 +291,7 @@ export function getIdleSessions(projects: Project[]): IdleSessionInfo[] {
           lastResponse = match.lastAssistantMsg
         }
       }
-      idle.push({
+      seen.set(dedupeKey, {
         projectPath: project.path,
         projectName: project.name,
         tty: s.tty,
@@ -299,6 +302,7 @@ export function getIdleSessions(projects: Project[]): IdleSessionInfo[] {
       })
     }
   }
+  const idle = Array.from(seen.values())
   idle.sort((a, b) => b.idleSinceMs - a.idleSinceMs)
   return idle
 }

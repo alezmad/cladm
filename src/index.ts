@@ -812,14 +812,14 @@ async function main() {
     } else {
       const sessions = await detectActiveSessions()
       const changed = updateProjectSessions(projects, sessions)
-      // Eagerly load session data for active projects (needed for idle panel)
+      const transitioned = checkTransitions(projects, prevBusySnapshot)
+      // Eagerly load/refresh session data for active projects (needed for idle panel)
       for (const p of projects) {
-        if (p.activeSessions > 0 && !p.sessions) {
+        if (p.activeSessions > 0 && (!p.sessions || transitioned.length > 0)) {
           p.sessions = await loadSessions(p.path)
           p.sessionCount = p.sessions.length
         }
       }
-      const transitioned = checkTransitions(projects, prevBusySnapshot)
       prevBusySnapshot = snapshotBusy(projects)
       if (transitioned.length > 0) {
         playDoneSound()
