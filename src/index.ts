@@ -21,7 +21,7 @@ import { discoverProjects } from "./data/history"
 import { loadGitMetadata, loadBranches } from "./data/git"
 import { loadSessions } from "./data/sessions"
 import { generateMockProjects, generateMockSessions, generateMockBranches, generateMockBusySessions } from "./data/mock"
-import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, focusTerminalByPath, checkTransitions, snapshotBusy, playDoneSound } from "./data/monitor"
+import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, focusTerminalByPath, checkTransitions, snapshotBusy, playDoneSound, getSessionStatus, populateMockSessionStatus, getIdleSessions } from "./data/monitor"
 import { launchSelections } from "./actions/launcher"
 import type { Project, DisplayRow } from "./lib/types"
 import { timeAgo, formatSize, elapsedCompact } from "./lib/time"
@@ -45,12 +45,14 @@ let sortedIndices: number[] = []
 let displayRows: DisplayRow[] = []
 let monitorInterval: ReturnType<typeof setInterval> | null = null
 let prevBusySnapshot: Map<string, number> = new Map()
+let bottomPanelMode: "preview" | "idle" = "preview"
 
 // ─── UI Refs ────────────────────────────────────────────────────────
 let renderer: CliRenderer
 let headerText: TextRenderable
 let colHeaderText: TextRenderable
 let listBox: ScrollBoxRenderable
+let previewBox: BoxRenderable
 let previewText: TextRenderable
 let footerText: TextRenderable
 
@@ -180,6 +182,12 @@ function fmtSessionRow(
   const age = timeAgo(session.timestamp)
   const size = formatSize(session.sizeBytes)
 
+  const status = getSessionStatus(project.path, session.id)
+  let statusTag: string
+  if (status === "busy") statusTag = green("● running")
+  else if (status === "idle") statusTag = yellow("◉ idle")
+  else statusTag = ""
+
   const promptText = session.lastUserPrompt
     ? session.lastUserPrompt.length > 60
       ? session.lastUserPrompt.slice(0, 57) + "..."
@@ -191,9 +199,11 @@ function fmtSessionRow(
       : session.lastAssistantMsg
     : "(no text response)"
 
+  const statusSuffix = statusTag ? ` ${statusTag}` : ""
+
   return t`      ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
     size.padEnd(7)
-  )} ${fg(ACCENT)('"' + title + '"')}
+  )} ${fg(ACCENT)('"' + title + '"')}${statusSuffix}
       ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
       ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
 }
@@ -225,12 +235,16 @@ function updateHeader() {
   const modeLabel = demoMode ? " [DEMO]" : ""
   const activeCount = projects.reduce((sum, p) => sum + (p.activeSessions > 0 ? 1 : 0), 0)
   const busyCount = projects.reduce((sum, p) => sum + (p.busySessions > 0 ? 1 : 0), 0)
-  const activeLabel = activeCount > 0
-    ? ` │ ${green(`${busyCount} busy`)} ${yellow(`${activeCount - busyCount} idle`)}`
-    : ""
-  headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${branchNote}   ${dim(
-    `sort: ${sortLabels[sortMode]} │ ${projects.length} projects`
-  )}${activeLabel}`
+  const idleCount = activeCount - busyCount
+  if (activeCount > 0) {
+    headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${branchNote}   ${dim(
+      `sort: ${sortLabels[sortMode]} │ ${projects.length} projects`
+    )} │ ${green(`${busyCount} busy`)} ${yellow(`${idleCount} idle`)}`
+  } else {
+    headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${branchNote}   ${dim(
+      `sort: ${sortLabels[sortMode]} │ ${projects.length} projects`
+    )}`
+  }
 }
 
 function updateColumnHeaders() {
@@ -238,9 +252,49 @@ function updateColumnHeaders() {
   colHeaderText.content = t`  ${dim(cols)}`
 }
 
+function fmtIdleRow(s: { idleSinceMs: number; projectName: string; sessionTitle: string }) {
+  const elapsed = (elapsedCompact(s.idleSinceMs) || "<5s").padEnd(6)
+  const name = (s.projectName.length > 20 ? s.projectName.slice(0, 17) + "..." : s.projectName).padEnd(22)
+  const title = s.sessionTitle.length > 40 ? s.sessionTitle.slice(0, 37) + "..." : s.sessionTitle
+  return t`  ${yellow("◉")} ${dim(elapsed)}${name}${dim('"' + title + '"')}`
+}
+
+function updateIdlePanel() {
+  const idle = getIdleSessions(projects)
+  const n = idle.length
+  previewBox.title = ` Idle Sessions (${n}) `
+  if (n === 0) {
+    previewText.content = t`${dim("  No idle sessions")}`
+    return
+  }
+  const show = idle.slice(0, 5)
+  const r0 = show[0] ? fmtIdleRow(show[0]) : t``
+  const r1 = show[1] ? fmtIdleRow(show[1]) : null
+  const r2 = show[2] ? fmtIdleRow(show[2]) : null
+  const r3 = show[3] ? fmtIdleRow(show[3]) : null
+  const r4 = show[4] ? fmtIdleRow(show[4]) : null
+  const more = n > 5 ? t`
+    ${dim(`+${n - 5} more`)}` : t``
+  previewText.content = t`    ${dim("TIME".padEnd(6))}${dim("PROJECT".padEnd(22))}${dim("SESSION")}
+${r0}${r1 ? t`
+${r1}` : t``}${r2 ? t`
+${r2}` : t``}${r3 ? t`
+${r3}` : t``}${r4 ? t`
+${r4}` : t``}${more}`
+}
+
+function updateBottomPanel() {
+  if (bottomPanelMode === "idle") {
+    updateIdlePanel()
+  } else {
+    previewBox.title = " Preview "
+    updatePreview()
+  }
+}
+
 function updateFooter() {
   footerText.content = t`  ${dim(
-    "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ a all │ n none │ s sort │ enter launch │ q quit"
+    "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter launch │ q quit"
   )}`
 }
 
@@ -265,7 +319,9 @@ function updatePreview() {
     )} ${project.tags || "-"}`
   } else if (row.type === "session" && project.sessions) {
     const s = project.sessions[row.sessionIndex!]
-    previewText.content = t`  ${bold("Session:")} ${s.title}
+    const sStatus = getSessionStatus(project.path, s.id)
+    const sLabel = sStatus === "busy" ? green(" ● running") : sStatus === "idle" ? yellow(" ◉ idle") : ""
+    previewText.content = t`  ${bold("Session:")} ${s.title}${sLabel}
   ${dim(timeAgo(s.timestamp))} · ${dim(formatSize(s.sizeBytes))} · ${magenta(s.branch || "-")}
   ${dim("Last prompt:")} ${s.lastUserPrompt || dim("(no text)")}
   ${dim("Claude:")} ${s.lastAssistantMsg || dim("(no text response)")}`
@@ -315,8 +371,9 @@ function rebuildList() {
       content = fmtNewSessionRow(row.projectIndex, isSel)
     }
 
-    const isActive = row.type === "project" && project.activeSessions > 0
-    const bgColor = isCursor ? CURSOR_BG : isActive ? ACTIVE_BG : undefined
+    const isActiveProject = row.type === "project" && project.activeSessions > 0
+    const isActiveSession = row.type === "session" && getSessionStatus(project.path, project.sessions![row.sessionIndex!].id) !== null
+    const bgColor = isCursor ? CURSOR_BG : (isActiveProject || isActiveSession) ? ACTIVE_BG : undefined
 
     if (bgColor) {
       listBox.add(
@@ -365,7 +422,7 @@ function ensureCursorVisible() {
 function updateAll() {
   updateHeader()
   rebuildList()
-  updatePreview()
+  updateBottomPanel()
 }
 
 // ─── Keyboard ───────────────────────────────────────────────────────
@@ -476,6 +533,10 @@ function handleKeypress(key: KeyEvent) {
       selectedBranches.clear()
       break
 
+    case "i":
+      bottomPanelMode = bottomPanelMode === "preview" ? "idle" : "preview"
+      break
+
     case "s":
       sortMode = (sortMode + 1) % sortLabels.length
       applySortMode()
@@ -521,6 +582,7 @@ async function expandProject(projectIndex: number) {
     if (!project.branches) {
       project.branches = generateMockBranches(project.path)
     }
+    populateMockSessionStatus(project)
   } else {
     const loads: Promise<void>[] = []
     if (!project.sessions) {
@@ -618,7 +680,7 @@ async function main() {
     viewportCulling: true,
   })
 
-  const previewBox = new BoxRenderable(renderer, {
+  previewBox = new BoxRenderable(renderer, {
     height: 7,
     flexShrink: 0,
     width: "100%",
@@ -655,7 +717,7 @@ async function main() {
   updateHeader()
   updateColumnHeaders()
   rebuildList()
-  updatePreview()
+  updateBottomPanel()
   updateFooter()
 
   renderer.keyInput.on("keypress", handleKeypress)
@@ -664,6 +726,13 @@ async function main() {
   if (demoMode) {
     generateMockActiveSessions(projects)
     generateMockBusySessions(projects)
+    for (const p of projects) {
+      if (p.activeSessions > 0 && !p.sessions) {
+        p.sessions = generateMockSessions(p.path)
+        p.sessionCount = p.sessions.length
+      }
+      populateMockSessionStatus(p)
+    }
     prevBusySnapshot = snapshotBusy(projects)
     updateAll()
   } else {
@@ -680,14 +749,20 @@ async function main() {
       generateMockBusySessions(projects)
       const transitioned = checkTransitions(projects, prevBusySnapshot)
       prevBusySnapshot = snapshotBusy(projects)
-      if (transitioned.length > 0) playDoneSound()
+      if (transitioned.length > 0) {
+        playDoneSound()
+        bottomPanelMode = "idle"
+      }
       updateAll()
     } else {
       const sessions = await detectActiveSessions()
       const changed = updateProjectSessions(projects, sessions)
       const transitioned = checkTransitions(projects, prevBusySnapshot)
       prevBusySnapshot = snapshotBusy(projects)
-      if (transitioned.length > 0) playDoneSound()
+      if (transitioned.length > 0) {
+        playDoneSound()
+        bottomPanelMode = "idle"
+      }
       if (changed) updateAll()
     }
   }, 5000)

@@ -93,6 +93,7 @@ Press `→` on any project to expand it and see branches and individual sessions
 
 Each session shows:
 - **Title** — auto-generated session title
+- **Status** — `● running` (green) or `◉ idle` (yellow) for active sessions
 - **Last prompt** — your most recent message
 - **Claude's response** — the assistant's last reply
 - **Size & age** — session file size and time since last use

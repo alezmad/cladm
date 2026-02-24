@@ -1,6 +1,6 @@
 import { readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
-import type { Project } from "../lib/types"
+import type { Project, SessionInfo } from "../lib/types"
 
 const PROJECTS_DIR = `${Bun.env.HOME}/.claude/projects`
 const BUSY_THRESHOLD_MS = 5000
@@ -214,6 +214,80 @@ export function playDoneSound(): void {
     stdout: "ignore",
     stderr: "ignore",
   })
+}
+
+export function getSessionStatus(projectPath: string, sessionId: string): "busy" | "idle" | null {
+  const sessions = sessionsByPath.get(projectPath)
+  if (!sessions) return null
+  for (const s of sessions) {
+    if (s.sessionFile && s.sessionFile.endsWith(`${sessionId}.jsonl`)) {
+      return s.busy ? "busy" : "idle"
+    }
+  }
+  return null
+}
+
+export function populateMockSessionStatus(project: Project): void {
+  if (!project.sessions || project.activeSessions === 0) return
+  const entries: ActiveSession[] = []
+  // Pick first 1-2 sessions as "active"
+  const activeCount = Math.min(project.activeSessions, project.sessions.length)
+  for (let i = 0; i < activeCount; i++) {
+    const s = project.sessions[i]
+    const isBusy = project.busySessions > 0 && i < project.busySessions
+    entries.push({
+      pid: `mock-${s.id}`,
+      cwd: project.path,
+      tty: `/dev/ttys${100 + i}`,
+      sessionFile: `${PROJECTS_DIR}/${project.path.replaceAll("/", "-")}/${s.id}.jsonl`,
+      busy: isBusy,
+      lastActivityMs: isBusy ? Date.now() - 1000 : Date.now() - 120_000,
+    })
+  }
+  sessionsByPath.set(project.path, entries)
+}
+
+export interface IdleSessionInfo {
+  projectPath: string
+  projectName: string
+  tty: string
+  idleSinceMs: number
+  sessionTitle: string
+  lastPrompt: string
+}
+
+export function getIdleSessions(projects: Project[]): IdleSessionInfo[] {
+  const idle: IdleSessionInfo[] = []
+  for (const project of projects) {
+    const sessions = sessionsByPath.get(project.path)
+    if (!sessions) continue
+    for (const s of sessions) {
+      if (s.busy) continue
+      if (!s.lastActivityMs) continue
+      // Find matching session info for title/prompt
+      let title = ""
+      let lastPrompt = ""
+      if (project.sessions) {
+        const match = project.sessions.find(
+          ps => s.sessionFile && s.sessionFile.endsWith(`${ps.id}.jsonl`)
+        )
+        if (match) {
+          title = match.title
+          lastPrompt = match.lastUserPrompt
+        }
+      }
+      idle.push({
+        projectPath: project.path,
+        projectName: project.name,
+        tty: s.tty,
+        idleSinceMs: s.lastActivityMs,
+        sessionTitle: title || "(session)",
+        lastPrompt: lastPrompt || "",
+      })
+    }
+  }
+  idle.sort((a, b) => b.idleSinceMs - a.idleSinceMs)
+  return idle
 }
 
 export function generateMockActiveSessions(projects: Project[]): void {

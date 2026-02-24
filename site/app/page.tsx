@@ -246,7 +246,8 @@ export default function Home() {
             <p className="font-[family-name:var(--font-mono)] text-dim text-xs text-center mb-6">
               Press <Keycap>&rarr;</Keycap> to expand. Browse branches, see
               session conversations with last prompt and Claude&apos;s response.
-              Resume any session directly.
+              Running sessions show <span className="text-green">● running</span> or{" "}
+              <span className="text-yellow">◉ idle</span> status inline. Resume any session directly.
             </p>
             <TerminalWindow title="cladm — 2 selected (1 branch switch)">
               <Image
