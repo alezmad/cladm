@@ -14,9 +14,9 @@ const pixel = Silkscreen({
 });
 
 export const metadata: Metadata = {
-  title: "cladm — TUI launcher for Claude Code",
+  title: "cladm — Monitor & launch Claude Code sessions",
   description:
-    "Browse all your projects, see git status at a glance, expand into sessions and branches, then launch everything in parallel Terminal windows.",
+    "Multi-project Claude Code session monitor. Track busy/idle status in real time, see usage costs, get notified when Claude finishes, and launch everything in parallel.",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "32x32" },
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "cladm",
-    description: "TUI launcher for Claude Code sessions",
+    description: "Monitor & launch Claude Code sessions across all your projects",
     url: "https://claudm.com",
     siteName: "cladm",
     type: "website",
@@ -36,14 +36,14 @@ export const metadata: Metadata = {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: "cladm — TUI launcher for Claude Code sessions",
+        alt: "cladm — Monitor & launch Claude Code sessions",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
     title: "cladm",
-    description: "TUI launcher for Claude Code sessions",
+    description: "Monitor & launch Claude Code sessions across all your projects",
     images: ["/og-image.png"],
   },
 };

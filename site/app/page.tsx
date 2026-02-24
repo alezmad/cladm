@@ -16,6 +16,8 @@ import {
   SpaceInvadersIcon,
   EyeIcon,
   BellIcon,
+  TrendingUpIcon,
+  ThunderIcon,
 } from "raster-react";
 
 function PixelDivider() {
@@ -137,13 +139,14 @@ export default function Home() {
               </h1>
 
               <p className="font-[family-name:var(--font-pixel)] text-accent text-lg md:text-xl mb-5">
-                TUI LAUNCHER FOR CLAUDE CODE
+                MULTI-PROJECT CLAUDE CODE MONITOR
               </p>
 
               <p className="font-[family-name:var(--font-mono)] text-dim text-sm max-w-md leading-relaxed mb-8">
-                Browse all your projects. See git status at a glance. Monitor
-                which sessions are busy or idle in real time. Get notified when
-                Claude finishes. Launch everything in parallel Terminal windows.
+                Track all your Claude Code sessions in one place. See
+                busy/idle status in real time, monitor usage costs, get
+                notified when Claude finishes, and launch everything in
+                parallel Terminal windows.
               </p>
 
               {/* Install command */}
@@ -273,8 +276,8 @@ export default function Home() {
         <div className="max-w-2xl mx-auto">
           <div className="pixel-border bg-surface p-6">
             <p className="font-[family-name:var(--font-mono)] text-dim text-xs leading-relaxed mb-5">
-              cladm detects active Claude Code sessions and shows their real-time status.
-              When Claude finishes responding, a sound notification plays so you never miss it.
+              cladm detects all running Claude Code sessions across every project and shows their real-time status.
+              When any session finishes, a sound plays and the dock icon bounces — so you never miss it, even across dozens of parallel sessions.
             </p>
 
             <div className="space-y-3 font-[family-name:var(--font-mono)] text-xs">
@@ -298,12 +301,113 @@ export default function Home() {
 
             <div className="mt-5 pt-4 border-t border-border">
               <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] leading-relaxed">
-                Detection works by monitoring JSONL file modification times in{" "}
-                <code className="text-accent">~/.claude/projects/</code>. Sessions
-                writing within 5 seconds are busy; otherwise idle. Header shows
-                total busy/idle count across all projects.
+                Detection reads the tail of each session&apos;s JSONL in{" "}
+                <code className="text-accent">~/.claude/projects/</code>. A session is
+                busy if the file was written recently OR the last assistant message
+                has a pending tool call. This prevents false idle triggers during
+                long-running tools and subtasks.
               </p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <PixelDivider />
+
+      {/* ══════ USAGE + IDLE PANELS ══════ */}
+      <section className="max-w-5xl mx-auto px-6 py-16">
+        <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-12 text-center">
+          // USAGE & IDLE PANELS
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          {/* Usage panel mock */}
+          <div>
+            <div className="flex items-center gap-4 mb-4">
+              <div className="h-[2px] flex-1 bg-border" />
+              <h3 className="font-[family-name:var(--font-pixel)] text-text text-xs uppercase tracking-wider whitespace-nowrap">
+                USAGE TRACKING
+              </h3>
+              <div className="h-[2px] flex-1 bg-border" />
+            </div>
+            <div className="pixel-border bg-surface p-5">
+              <div className="font-[family-name:var(--font-mono)] text-xs space-y-3">
+                <div>
+                  <div className="text-text font-bold mb-1">Session</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-green">{"████████"}</span>
+                    <span className="text-dim">{"░░░░░░░░░░"}</span>
+                    <span className="text-text font-bold">22%</span>
+                  </div>
+                  <div className="text-dim text-[10px] mt-0.5">resets 3h 2m &middot; $1.82/h</div>
+                </div>
+                <div>
+                  <div className="text-text font-bold mb-1">All models <span className="text-dim font-normal">$412</span></div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-cyan">{"████████████"}</span>
+                    <span className="text-dim">{"░░░░░░"}</span>
+                    <span className="text-text font-bold">69%</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text font-bold mb-1">Sonnet <span className="text-dim font-normal">$31</span></div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-green">{"█"}</span>
+                    <span className="text-dim">{"░░░░░░░░░░░░░░░░░"}</span>
+                    <span className="text-text font-bold">5%</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text font-bold mb-1">Feb total <span className="text-dim font-normal">$1,847</span></div>
+                  <div className="text-dim text-[10px]">$2.41/h avg &middot; 8,234 reqs</div>
+                </div>
+              </div>
+            </div>
+            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] mt-3 leading-relaxed">
+              Press <Keycap>u</Keycap> to toggle. Tracks session (5h window), weekly
+              all-model and sonnet-only costs against configurable plan limits.
+            </p>
+          </div>
+
+          {/* Idle sessions panel mock */}
+          <div>
+            <div className="flex items-center gap-4 mb-4">
+              <div className="h-[2px] flex-1 bg-border" />
+              <h3 className="font-[family-name:var(--font-pixel)] text-text text-xs uppercase tracking-wider whitespace-nowrap">
+                IDLE SESSIONS
+              </h3>
+              <div className="h-[2px] flex-1 bg-border" />
+            </div>
+            <div className="pixel-border bg-surface p-5">
+              <div className="font-[family-name:var(--font-mono)] text-xs space-y-2">
+                <div className="text-dim text-[10px] mb-2">
+                  {"  TIME  PROJECT              SESSION"}
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-yellow">◉</span>
+                  <span className="text-dim">12s</span>
+                  <span className="text-text">acme-api</span>
+                  <span className="text-dim ml-auto truncate max-w-[140px]">&quot;Fix rate limiter...&quot;</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-yellow">◉</span>
+                  <span className="text-dim">2m{" "}</span>
+                  <span className="text-text">quantum-dash</span>
+                  <span className="text-dim ml-auto truncate max-w-[140px]">&quot;Build chart tooltip...&quot;</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-yellow">◉</span>
+                  <span className="text-dim">8m{" "}</span>
+                  <span className="text-text">ml-pipeline</span>
+                  <span className="text-dim ml-auto truncate max-w-[140px]">&quot;Add BERT tokenizer...&quot;</span>
+                </div>
+              </div>
+            </div>
+            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] mt-3 leading-relaxed">
+              Press <Keycap>i</Keycap> to toggle. Shows sessions waiting for your
+              input, sorted by most recently idle. Press Enter to focus a session&apos;s
+              Terminal tab directly.
+            </p>
           </div>
         </div>
       </section>
@@ -318,6 +422,26 @@ export default function Home() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <FeatureBlock
+            icon={<EyeIcon size={28} />}
+            title="LIVE MONITORING"
+            desc="Track all Claude sessions across every project. Busy/idle status updates in real time with elapsed timers."
+          />
+          <FeatureBlock
+            icon={<TrendingUpIcon size={28} />}
+            title="USAGE TRACKING"
+            desc="Session, weekly, and monthly cost bars. Track all-model and sonnet-only usage against configurable plan limits."
+          />
+          <FeatureBlock
+            icon={<BellIcon size={28} />}
+            title="NOTIFICATIONS"
+            desc="Sound + dock bounce when any session finishes. Never miss a completed task across dozens of parallel sessions."
+          />
+          <FeatureBlock
+            icon={<ThunderIcon size={28} />}
+            title="FOCUS SESSION"
+            desc="Press Enter on any idle session to instantly focus its Terminal tab. Flash animation highlights the window."
+          />
+          <FeatureBlock
             icon={<SearchIcon size={28} />}
             title="AUTO-DISCOVERY"
             desc="Reads ~/.claude/history.jsonl to find every project you've used with Claude Code. No config needed."
@@ -325,27 +449,12 @@ export default function Home() {
           <FeatureBlock
             icon={<NetworkIcon size={28} />}
             title="GIT METADATA"
-            desc="Branch, sync status (ahead/behind), last commit, dirty state — all loaded in parallel."
+            desc="Branch, sync status (ahead/behind), last commit, dirty state — all loaded in parallel per project."
           />
           <FeatureBlock
             icon={<FolderIcon size={28} />}
             title="SESSION BROWSER"
             desc="Expand any project to browse past sessions. See conversation previews and resume directly."
-          />
-          <FeatureBlock
-            icon={<ArrowRightIcon size={28} />}
-            title="BRANCH SWITCHING"
-            desc="Select a non-current branch to launch Claude with an auto-prompt to switch and stash."
-          />
-          <FeatureBlock
-            icon={<EyeIcon size={28} />}
-            title="LIVE ACTIVITY"
-            desc="See which sessions are busy or idle in real time. Green dot = Claude is working. Yellow dot + elapsed time = waiting for input."
-          />
-          <FeatureBlock
-            icon={<BellIcon size={28} />}
-            title="DONE SOUND"
-            desc="Plays a sound when Claude finishes responding. Never miss a completed task — even across multiple sessions."
           />
           <FeatureBlock
             icon={<TerminalIcon size={28} />}
@@ -376,12 +485,15 @@ export default function Home() {
                 ["Space", "Toggle selection"],
                 ["→", "Expand project"],
                 ["←", "Collapse"],
+                ["Enter", "Launch selected / focus session"],
+                ["i", "Toggle idle sessions panel"],
+                ["u", "Toggle usage panel"],
+                ["/", "Filter projects"],
                 ["a", "Select all"],
                 ["n", "Deselect all"],
                 ["s", "Cycle sort mode"],
                 ["f", "Open folder in Finder"],
                 ["g", "Go to active session"],
-                ["Enter", "Launch selected"],
                 ["PgUp PgDn", "Jump 15 rows"],
                 ["q / Esc", "Quit"],
               ].map(([key, desc]) => (
