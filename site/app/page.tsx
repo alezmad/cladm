@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { EmailReveal } from "./email-reveal";
+import { NewsletterForm } from "./newsletter-form";
 import { TerminalCascade } from "./terminal-cascade";
 import {
   SearchIcon,
@@ -593,6 +594,13 @@ export default function Home() {
               </TerminalWindow>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ══════ NEWSLETTER ══════ */}
+      <section className="max-w-5xl mx-auto px-6 py-16">
+        <div className="max-w-md mx-auto">
+          <NewsletterForm />
         </div>
       </section>
 
