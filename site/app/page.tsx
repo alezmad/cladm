@@ -320,8 +320,8 @@ export default function Home() {
           // USAGE & IDLE PANELS
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-          {/* Usage panel mock */}
+        <div className="space-y-12 max-w-4xl mx-auto">
+          {/* Usage panel screenshot */}
           <div>
             <div className="flex items-center gap-4 mb-4">
               <div className="h-[2px] flex-1 bg-border" />
@@ -330,46 +330,22 @@ export default function Home() {
               </h3>
               <div className="h-[2px] flex-1 bg-border" />
             </div>
-            <div className="pixel-border bg-surface p-5">
-              <div className="font-[family-name:var(--font-mono)] text-xs space-y-3">
-                <div>
-                  <div className="text-text font-bold mb-1">Session</div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-green">{"████████"}</span>
-                    <span className="text-dim">{"░░░░░░░░░░"}</span>
-                    <span className="text-text font-bold">22%</span>
-                  </div>
-                  <div className="text-dim text-[10px] mt-0.5">resets 3h 2m &middot; $1.82/h</div>
-                </div>
-                <div>
-                  <div className="text-text font-bold mb-1">All models <span className="text-dim font-normal">$412</span></div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan">{"████████████"}</span>
-                    <span className="text-dim">{"░░░░░░"}</span>
-                    <span className="text-text font-bold">69%</span>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-text font-bold mb-1">Sonnet <span className="text-dim font-normal">$31</span></div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-green">{"█"}</span>
-                    <span className="text-dim">{"░░░░░░░░░░░░░░░░░"}</span>
-                    <span className="text-text font-bold">5%</span>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-text font-bold mb-1">Feb total <span className="text-dim font-normal">$1,847</span></div>
-                  <div className="text-dim text-[10px]">$2.41/h avg &middot; 8,234 reqs</div>
-                </div>
-              </div>
-            </div>
-            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] mt-3 leading-relaxed">
+            <p className="font-[family-name:var(--font-mono)] text-dim text-xs text-center mb-6">
               Press <Keycap>u</Keycap> to toggle. Tracks session (5h window), weekly
-              all-model and sonnet-only costs against configurable plan limits.
+              all-model and sonnet-only costs against configurable plan limits, plus monthly totals.
             </p>
+            <TerminalWindow title="cladm — usage panel">
+              <Image
+                src="/screenshot-usage.png"
+                alt="cladm usage tracking panel with session, weekly, and monthly cost bars"
+                width={980}
+                height={500}
+                className="w-full"
+              />
+            </TerminalWindow>
           </div>
 
-          {/* Idle sessions panel mock */}
+          {/* Idle sessions screenshot */}
           <div>
             <div className="flex items-center gap-4 mb-4">
               <div className="h-[2px] flex-1 bg-border" />
@@ -378,36 +354,20 @@ export default function Home() {
               </h3>
               <div className="h-[2px] flex-1 bg-border" />
             </div>
-            <div className="pixel-border bg-surface p-5">
-              <div className="font-[family-name:var(--font-mono)] text-xs space-y-2">
-                <div className="text-dim text-[10px] mb-2">
-                  {"  TIME  PROJECT              SESSION"}
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-yellow">◉</span>
-                  <span className="text-dim">12s</span>
-                  <span className="text-text">acme-api</span>
-                  <span className="text-dim ml-auto truncate max-w-[140px]">&quot;Fix rate limiter...&quot;</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-yellow">◉</span>
-                  <span className="text-dim">2m{" "}</span>
-                  <span className="text-text">quantum-dash</span>
-                  <span className="text-dim ml-auto truncate max-w-[140px]">&quot;Build chart tooltip...&quot;</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-yellow">◉</span>
-                  <span className="text-dim">8m{" "}</span>
-                  <span className="text-text">ml-pipeline</span>
-                  <span className="text-dim ml-auto truncate max-w-[140px]">&quot;Add BERT tokenizer...&quot;</span>
-                </div>
-              </div>
-            </div>
-            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] mt-3 leading-relaxed">
+            <p className="font-[family-name:var(--font-mono)] text-dim text-xs text-center mb-6">
               Press <Keycap>i</Keycap> to toggle. Shows sessions waiting for your
               input, sorted by most recently idle. Press Enter to focus a session&apos;s
               Terminal tab directly.
             </p>
+            <TerminalWindow title="cladm — idle sessions (2)">
+              <Image
+                src="/screenshot-idle.png"
+                alt="cladm idle sessions panel showing waiting sessions with elapsed time"
+                width={980}
+                height={500}
+                className="w-full"
+              />
+            </TerminalWindow>
           </div>
         </div>
       </section>
