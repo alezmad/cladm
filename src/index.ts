@@ -20,13 +20,15 @@ import {
 import { discoverProjects } from "./data/history"
 import { loadGitMetadata, loadBranches } from "./data/git"
 import { loadSessions } from "./data/sessions"
-import { generateMockProjects, generateMockSessions, generateMockBranches } from "./data/mock"
+import { generateMockProjects, generateMockSessions, generateMockBranches, generateMockBusySessions } from "./data/mock"
+import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, focusTerminalByPath, checkTransitions, snapshotBusy, playDoneSound } from "./data/monitor"
 import { launchSelections } from "./actions/launcher"
 import type { Project, DisplayRow } from "./lib/types"
-import { timeAgo, formatSize } from "./lib/time"
+import { timeAgo, formatSize, elapsedCompact } from "./lib/time"
 
 // ─── Theme ──────────────────────────────────────────────────────────
 const CURSOR_BG = "#283457"
+const ACTIVE_BG = "#1a2e1a"
 const ACCENT = "#7aa2f7"
 const DIM_CLR = "#565f89"
 
@@ -41,6 +43,8 @@ let sortMode = 0
 const sortLabels = ["recent", "name", "commit", "sessions"]
 let sortedIndices: number[] = []
 let displayRows: DisplayRow[] = []
+let monitorInterval: ReturnType<typeof setInterval> | null = null
+let prevBusySnapshot: Map<string, number> = new Map()
 
 // ─── UI Refs ────────────────────────────────────────────────────────
 let renderer: CliRenderer
@@ -111,6 +115,21 @@ function fmtSyncIndicator(ahead: number, behind: number): string {
 }
 
 function fmtProjectRow(project: Project, isSelected: boolean) {
+  let activeDot: string
+  let activeTag: string
+  if (project.activeSessions > 0) {
+    if (project.busySessions > 0) {
+      activeDot = green("●")
+      activeTag = project.activeSessions > 1 ? yellow(String(project.activeSessions)) : " "
+    } else {
+      activeDot = yellow("◉")
+      const elapsed = elapsedCompact(project.lastActivityMs)
+      activeTag = elapsed ? dim(elapsed.padEnd(2).slice(0, 2)) : " "
+    }
+  } else {
+    activeDot = dim("○")
+    activeTag = " "
+  }
   const check = isSelected ? green("✓") : " "
   const arrow = project.expanded ? "▼" : "▶"
   const name =
@@ -137,7 +156,7 @@ function fmtProjectRow(project: Project, isSelected: boolean) {
   else if (ca.includes("d ago")) claudeCol = green(ca.padEnd(9))
   else claudeCol = dim(ca.padEnd(9))
 
-  return t` [${check}] ${dim(arrow)} ${name.padEnd(28)} ${magenta(branch.padEnd(9))}${syncCol}${dim(
+  return t` ${activeDot}${activeTag}[${check}] ${dim(arrow)} ${name.padEnd(28)} ${magenta(branch.padEnd(9))}${syncCol}${dim(
     (project.commitAge || "-").padEnd(10)
   )}${(project.commitMsg || "-").padEnd(22)}${dirtyCol}${claudeCol}${dim(
     String(project.sessionCount).padStart(3)
@@ -204,9 +223,14 @@ function updateHeader() {
   const total = selectedProjects.size + selectedSessions.size
   const branchNote = selectedBranches.size > 0 ? ` (${selectedBranches.size} branch switch)` : ""
   const modeLabel = demoMode ? " [DEMO]" : ""
+  const activeCount = projects.reduce((sum, p) => sum + (p.activeSessions > 0 ? 1 : 0), 0)
+  const busyCount = projects.reduce((sum, p) => sum + (p.busySessions > 0 ? 1 : 0), 0)
+  const activeLabel = activeCount > 0
+    ? ` │ ${green(`${busyCount} busy`)} ${yellow(`${activeCount - busyCount} idle`)}`
+    : ""
   headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${branchNote}   ${dim(
     `sort: ${sortLabels[sortMode]} │ ${projects.length} projects`
-  )}`
+  )}${activeLabel}`
 }
 
 function updateColumnHeaders() {
@@ -216,7 +240,7 @@ function updateColumnHeaders() {
 
 function updateFooter() {
   footerText.content = t`  ${dim(
-    "↑↓ nav │ space select │ → expand │ ← collapse │ a all │ n none │ s sort │ enter launch │ q quit"
+    "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ a all │ n none │ s sort │ enter launch │ q quit"
   )}`
 }
 
@@ -291,11 +315,14 @@ function rebuildList() {
       content = fmtNewSessionRow(row.projectIndex, isSel)
     }
 
-    if (isCursor) {
+    const isActive = row.type === "project" && project.activeSessions > 0
+    const bgColor = isCursor ? CURSOR_BG : isActive ? ACTIVE_BG : undefined
+
+    if (bgColor) {
       listBox.add(
         Box(
           {
-            backgroundColor: CURSOR_BG,
+            backgroundColor: bgColor,
             shouldFill: true,
             width: "100%",
             height: rowHeight,
@@ -423,6 +450,22 @@ function handleKeypress(key: KeyEvent) {
       break
     }
 
+    case "f": {
+      const row = displayRows[cursor]
+      const project = projects[row.projectIndex]
+      Bun.spawn(["open", project.path])
+      break
+    }
+
+    case "g": {
+      const row = displayRows[cursor]
+      const project = projects[row.projectIndex]
+      if (project.activeSessions > 0) {
+        focusTerminalByPath(project.path)
+      }
+      return
+    }
+
     case "a":
       for (const p of projects) selectedProjects.add(p.path)
       break
@@ -439,12 +482,25 @@ function handleKeypress(key: KeyEvent) {
       cursor = 0
       break
 
-    case "return":
+    case "return": {
+      // If cursor is on a project row with active session and nothing selected, focus it
+      const returnRow = displayRows[cursor]
+      if (
+        returnRow.type === "project" &&
+        projects[returnRow.projectIndex].activeSessions > 0 &&
+        selectedProjects.size === 0 &&
+        selectedSessions.size === 0
+      ) {
+        focusTerminalByPath(projects[returnRow.projectIndex].path)
+        return
+      }
       doLaunch()
       return
+    }
 
     case "q":
     case "escape":
+      if (monitorInterval) clearInterval(monitorInterval)
       renderer.destroy()
       return
 
@@ -489,6 +545,7 @@ async function expandProject(projectIndex: number) {
 
 async function doLaunch() {
   if (selectedProjects.size === 0 && selectedSessions.size === 0) return
+  if (monitorInterval) clearInterval(monitorInterval)
   if (demoMode) {
     const total = selectedProjects.size + selectedSessions.size
     renderer.destroy()
@@ -598,6 +655,38 @@ async function main() {
   updateFooter()
 
   renderer.keyInput.on("keypress", handleKeypress)
+
+  // Live session monitoring
+  if (demoMode) {
+    generateMockActiveSessions(projects)
+    generateMockBusySessions(projects)
+    prevBusySnapshot = snapshotBusy(projects)
+    updateAll()
+  } else {
+    detectActiveSessions().then((sessions) => {
+      if (updateProjectSessions(projects, sessions)) updateAll()
+      prevBusySnapshot = snapshotBusy(projects)
+    })
+  }
+
+  monitorInterval = setInterval(async () => {
+    if (demoMode) {
+      for (const p of projects) { p.activeSessions = 0; p.busySessions = 0 }
+      generateMockActiveSessions(projects)
+      generateMockBusySessions(projects)
+      const transitioned = checkTransitions(projects, prevBusySnapshot)
+      prevBusySnapshot = snapshotBusy(projects)
+      if (transitioned.length > 0) playDoneSound()
+      updateAll()
+    } else {
+      const sessions = await detectActiveSessions()
+      const changed = updateProjectSessions(projects, sessions)
+      const transitioned = checkTransitions(projects, prevBusySnapshot)
+      prevBusySnapshot = snapshotBusy(projects)
+      if (transitioned.length > 0) playDoneSound()
+      if (changed) updateAll()
+    }
+  }, 5000)
 }
 
 main().catch((err) => {

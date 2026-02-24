@@ -21,6 +21,9 @@ export function generateMockProjects(): Project[] {
       sessionCount: 14,
       totalMessages: 342,
       tags: "ts bun hono",
+      activeSessions: 0,
+      busySessions: 0,
+      lastActivityMs: 0,
       expanded: false,
       sessions: null,
       branches: null,
@@ -40,6 +43,9 @@ export function generateMockProjects(): Project[] {
       sessionCount: 8,
       totalMessages: 187,
       tags: "ts react vite",
+      activeSessions: 0,
+      busySessions: 0,
+      lastActivityMs: 0,
       expanded: false,
       sessions: null,
       branches: null,
@@ -59,6 +65,9 @@ export function generateMockProjects(): Project[] {
       sessionCount: 22,
       totalMessages: 891,
       tags: "rust wgpu",
+      activeSessions: 0,
+      busySessions: 0,
+      lastActivityMs: 0,
       expanded: false,
       sessions: null,
       branches: null,
@@ -78,6 +87,9 @@ export function generateMockProjects(): Project[] {
       sessionCount: 5,
       totalMessages: 78,
       tags: "go docker k8s",
+      activeSessions: 0,
+      busySessions: 0,
+      lastActivityMs: 0,
       expanded: false,
       sessions: null,
       branches: null,
@@ -97,6 +109,9 @@ export function generateMockProjects(): Project[] {
       sessionCount: 11,
       totalMessages: 256,
       tags: "ts rn expo",
+      activeSessions: 0,
+      busySessions: 0,
+      lastActivityMs: 0,
       expanded: false,
       sessions: null,
       branches: null,
@@ -116,6 +131,9 @@ export function generateMockProjects(): Project[] {
       sessionCount: 3,
       totalMessages: 45,
       tags: "ts astro mdx",
+      activeSessions: 0,
+      busySessions: 0,
+      lastActivityMs: 0,
       expanded: false,
       sessions: null,
       branches: null,
@@ -135,6 +153,9 @@ export function generateMockProjects(): Project[] {
       sessionCount: 19,
       totalMessages: 523,
       tags: "py torch",
+      activeSessions: 0,
+      busySessions: 0,
+      lastActivityMs: 0,
       expanded: false,
       sessions: null,
       branches: null,
@@ -154,6 +175,9 @@ export function generateMockProjects(): Project[] {
       sessionCount: 2,
       totalMessages: 31,
       tags: "ts express pg",
+      activeSessions: 0,
+      busySessions: 0,
+      lastActivityMs: 0,
       expanded: false,
       sessions: null,
       branches: null,
@@ -397,6 +421,22 @@ const mockBranchData: Record<string, BranchInfo[]> = {
   "auth-service": [
     { name: "main", isCurrent: true, lastCommitAge: "14d ago", lastCommitMsg: "chore: dep updates", ahead: -1, behind: -1 },
   ],
+}
+
+export function generateMockBusySessions(projects: Project[]): void {
+  const now = Date.now()
+  for (const p of projects) {
+    if (p.activeSessions > 0) {
+      const isBusy = Math.random() > 0.4
+      p.busySessions = isBusy ? Math.min(p.activeSessions, 1 + Math.floor(Math.random() * p.activeSessions)) : 0
+      p.lastActivityMs = isBusy
+        ? now - Math.floor(Math.random() * 3000)
+        : now - (10_000 + Math.floor(Math.random() * 600_000))
+    } else {
+      p.busySessions = 0
+      p.lastActivityMs = 0
+    }
+  }
 }
 
 export function generateMockSessions(projectPath: string): SessionInfo[] {

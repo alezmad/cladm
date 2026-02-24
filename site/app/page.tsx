@@ -14,6 +14,8 @@ import {
   LinkedinIcon,
   MailIcon,
   SpaceInvadersIcon,
+  EyeIcon,
+  BellIcon,
 } from "raster-react";
 
 function PixelDivider() {
@@ -139,9 +141,9 @@ export default function Home() {
               </p>
 
               <p className="font-[family-name:var(--font-mono)] text-dim text-sm max-w-md leading-relaxed mb-8">
-                Browse all your projects. See git status at a glance. Expand
-                into sessions and branches. Launch everything in parallel
-                Terminal windows.
+                Browse all your projects. See git status at a glance. Monitor
+                which sessions are busy or idle in real time. Get notified when
+                Claude finishes. Launch everything in parallel Terminal windows.
               </p>
 
               {/* Install command */}
@@ -261,6 +263,52 @@ export default function Home() {
 
       <PixelDivider />
 
+      {/* ══════ LIVE MONITORING ══════ */}
+      <section className="max-w-5xl mx-auto px-6 py-16">
+        <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-12 text-center">
+          // LIVE SESSION MONITORING
+        </h2>
+
+        <div className="max-w-2xl mx-auto">
+          <div className="pixel-border bg-surface p-6">
+            <p className="font-[family-name:var(--font-mono)] text-dim text-xs leading-relaxed mb-5">
+              cladm detects active Claude Code sessions and shows their real-time status.
+              When Claude finishes responding, a sound notification plays so you never miss it.
+            </p>
+
+            <div className="space-y-3 font-[family-name:var(--font-mono)] text-xs">
+              <div className="flex items-center gap-3">
+                <span className="text-green text-base">●</span>
+                <span className="text-text">Busy</span>
+                <span className="text-dim">— Claude is actively processing</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-yellow text-base">◉</span>
+                <span className="text-dim">3m</span>
+                <span className="text-text">Idle</span>
+                <span className="text-dim">— Claude finished 3 min ago, waiting for input</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-dim text-base">○</span>
+                <span className="text-text ml-[22px]">No session</span>
+                <span className="text-dim">— No active Claude process</span>
+              </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-border">
+              <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] leading-relaxed">
+                Detection works by monitoring JSONL file modification times in{" "}
+                <code className="text-accent">~/.claude/projects/</code>. Sessions
+                writing within 5 seconds are busy; otherwise idle. Header shows
+                total busy/idle count across all projects.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <PixelDivider />
+
       {/* ══════ FEATURES ══════ */}
       <section className="max-w-5xl mx-auto px-6 py-16">
         <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-12 text-center">
@@ -287,6 +335,16 @@ export default function Home() {
             icon={<ArrowRightIcon size={28} />}
             title="BRANCH SWITCHING"
             desc="Select a non-current branch to launch Claude with an auto-prompt to switch and stash."
+          />
+          <FeatureBlock
+            icon={<EyeIcon size={28} />}
+            title="LIVE ACTIVITY"
+            desc="See which sessions are busy or idle in real time. Green dot = Claude is working. Yellow dot + elapsed time = waiting for input."
+          />
+          <FeatureBlock
+            icon={<BellIcon size={28} />}
+            title="DONE SOUND"
+            desc="Plays a sound when Claude finishes responding. Never miss a completed task — even across multiple sessions."
           />
           <FeatureBlock
             icon={<TerminalIcon size={28} />}
@@ -320,6 +378,8 @@ export default function Home() {
                 ["a", "Select all"],
                 ["n", "Deselect all"],
                 ["s", "Cycle sort mode"],
+                ["f", "Open folder in Finder"],
+                ["g", "Go to active session"],
                 ["Enter", "Launch selected"],
                 ["PgUp PgDn", "Jump 15 rows"],
                 ["q / Esc", "Quit"],
@@ -402,10 +462,11 @@ export default function Home() {
             <TerminalWindow title="cladm — 3 selected">
               <div className="p-3 font-[family-name:var(--font-mono)] text-[10px] leading-relaxed">
                 <div className="text-dim mb-1">
-                  {"    PROJECT              BRANCH   LAST USE"}
+                  {"     PROJECT              BRANCH   LAST USE"}
                 </div>
                 <div className="bg-[#283457] px-1">
-                  <span className="text-green">[✓]</span>
+                  <span className="text-green">●</span>
+                  <span className="text-green"> [✓]</span>
                   <span className="text-text">
                     {" "}
                     acme-api{"             "}
@@ -414,19 +475,24 @@ export default function Home() {
                   <span className="text-cyan">{"     "}25m ago</span>
                 </div>
                 <div className="px-1">
+                  <span className="text-yellow">◉</span>
+                  <span className="text-dim">2m</span>
                   <span className="text-green">[✓]</span>
                   <span className="text-text"> quantum-dashboard{"    "}</span>
                   <span className="text-magenta">feat/cha</span>
                   <span className="text-cyan">{"  "}1h ago</span>
                 </div>
                 <div className="px-1">
-                  <span className="text-green">[✓]</span>
+                  <span className="text-green">●</span>
+                  <span className="text-green"> [✓]</span>
                   <span className="text-text"> ml-pipeline{"          "}</span>
                   <span className="text-magenta">exp/bert</span>
                   <span className="text-cyan">{" "}just now</span>
                 </div>
-                <div className="px-1 text-dim">
-                  [ ] pixel-engine{"          "}develop{"  "}3h ago
+                <div className="px-1">
+                  <span className="text-dim">○</span>
+                  <span className="text-dim"> [ ]</span>
+                  <span className="text-dim"> pixel-engine{"          "}develop{"  "}3h ago</span>
                 </div>
               </div>
             </TerminalWindow>

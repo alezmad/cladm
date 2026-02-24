@@ -10,6 +10,16 @@ export function timeAgo(ms: number): string {
   return `${Math.floor(diff / 2592000)}mo ago`
 }
 
+export function elapsedCompact(ms: number): string {
+  if (!ms) return ""
+  const sec = Math.floor((Date.now() - ms) / 1000)
+  if (sec < 5) return ""
+  if (sec < 60) return `${sec}s`
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h`
+  return `${Math.floor(sec / 86400)}d`
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`

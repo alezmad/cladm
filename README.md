@@ -5,7 +5,7 @@
 <h3 align="center">TUI launcher for Claude Code sessions</h3>
 
 <p align="center">
-  Browse all your projects, see git status at a glance, expand into sessions and branches, then launch everything in parallel Terminal windows.
+  Browse all your projects, see git status at a glance, monitor active sessions in real time, get notified when Claude finishes, and launch everything in parallel Terminal windows.
 </p>
 
 ---
@@ -45,6 +45,20 @@ cladm --demo    # launch with mock data (try it out without any history)
 ## How it works
 
 cladm reads `~/.claude/history.jsonl` to discover every project you've used with Claude Code, then enriches each one with live git metadata. The result is a fast, keyboard-driven picker that shows you everything at a glance.
+
+## Live activity monitoring
+
+cladm detects running Claude Code sessions and shows their real-time status:
+
+| Indicator | Meaning |
+|-----------|---------|
+| `●` (green) | **Busy** — Claude is actively processing |
+| `◉ 3m` (yellow) | **Idle** — Claude finished 3 min ago, waiting for input |
+| `○` (dim) | No active session |
+
+**How it works:** cladm monitors JSONL file modification times in `~/.claude/projects/`. Sessions writing within 5 seconds are considered busy; otherwise idle. The elapsed time since the last response is shown next to idle indicators.
+
+**Sound notification:** When any session transitions from busy → idle, cladm plays a system sound (`Glass.aiff`) so you never miss a completed response — even when working across multiple projects.
 
 ## Screenshots
 
@@ -96,6 +110,8 @@ Select a branch to launch Claude with a prompt to switch to that branch. Select 
 | `a` | Select all |
 | `n` | Deselect all |
 | `s` | Cycle sort mode (recent → name → commit → sessions) |
+| `f` | Open project folder in Finder |
+| `g` | Go to active session (focus Terminal) |
 | `Enter` | Launch selected in Terminal.app |
 | `PageUp` `PageDown` | Jump 15 rows |
 | `Home` `End` | Jump to top/bottom |

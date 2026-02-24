@@ -4,9 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import Image from "next/image";
 
 const projects = [
-  { name: "acme-api", branch: "main", time: "25m ago" },
-  { name: "quantum-dash", branch: "feat/charts", time: "1h ago" },
-  { name: "ml-pipeline", branch: "exp/bert", time: "just now" },
+  { name: "acme-api", branch: "main", time: "25m ago", status: "busy" as const },
+  { name: "quantum-dash", branch: "feat/charts", time: "1h ago", status: "idle" as const, elapsed: "4m" },
+  { name: "ml-pipeline", branch: "exp/bert", time: "just now", status: "busy" as const },
 ];
 
 type Phase =
@@ -94,6 +94,12 @@ export function TerminalCascade() {
             {projects.map((proj, i) => {
               const checked = i < selectedCount;
               const isActive = i === selectedCount - 1 && phase === "selecting";
+              const dot = proj.status === "busy"
+                ? <span className="text-green">●</span>
+                : <span className="text-yellow">◉</span>;
+              const tag = proj.status === "idle" && proj.elapsed
+                ? <span className="text-dim">{proj.elapsed.padEnd(2)}</span>
+                : <span> </span>;
               return (
                 <div
                   key={`${proj.name}-${cycle}`}
@@ -101,17 +107,18 @@ export function TerminalCascade() {
                     isActive ? "bg-[#283457]" : ""
                   }`}
                 >
+                  {dot}{tag}
                   <span className={checked ? "text-green" : "text-dim"}>
                     {checked ? "[✓]" : "[ ]"}
                   </span>
-                  <span className="text-text"> {proj.name.padEnd(20)}</span>
+                  <span className="text-text"> {proj.name.padEnd(18)}</span>
                   <span className="text-magenta">{proj.branch.padEnd(13)}</span>
                   <span className="text-cyan">{proj.time}</span>
                 </div>
               );
             })}
             <div className="px-1 text-dim">
-              [ ] pixel-engine{"          "}develop{"      "}3h ago
+              <span>○</span><span> </span>[ ] pixel-engine{"        "}develop{"      "}3h ago
             </div>
 
             {/* Enter hint */}

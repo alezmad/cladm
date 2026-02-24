@@ -22,6 +22,9 @@ export interface Project {
   sessionCount: number
   totalMessages: number
   tags: string
+  activeSessions: number
+  busySessions: number
+  lastActivityMs: number
   expanded: boolean
   sessions: SessionInfo[] | null
   branches: BranchInfo[] | null
