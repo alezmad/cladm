@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { EmailReveal } from "./email-reveal";
 import { NewsletterForm } from "./newsletter-form";
+import { SubscribeModal } from "./subscribe-modal";
 import { TerminalCascade } from "./terminal-cascade";
 import {
   SearchIcon,
@@ -92,6 +93,7 @@ function FeatureBlock({
 export default function Home() {
   return (
     <div className="min-h-screen bg-bg selection:bg-accent/30">
+      <SubscribeModal />
       {/* ══════ HERO ══════ */}
       <section className="relative overflow-hidden scanlines">
         {/* Grid background */}
