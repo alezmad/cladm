@@ -495,7 +495,7 @@ function handleKeypress(key: KeyEvent) {
         return
       }
       doLaunch()
-      return
+      break
     }
 
     case "q":
@@ -545,18 +545,22 @@ async function expandProject(projectIndex: number) {
 
 async function doLaunch() {
   if (selectedProjects.size === 0 && selectedSessions.size === 0) return
-  if (monitorInterval) clearInterval(monitorInterval)
+  const total = selectedProjects.size + selectedSessions.size
   if (demoMode) {
-    const total = selectedProjects.size + selectedSessions.size
-    renderer.destroy()
-    console.log(`[Demo] Would launch ${total} session(s). Launch disabled in demo mode.`)
+    // Just clear selections in demo mode
+    selectedProjects.clear()
+    selectedSessions.clear()
+    selectedBranches.clear()
+    rebuildDisplayRows()
+    updateAll()
     return
   }
-  renderer.destroy()
-  const total = selectedProjects.size + selectedSessions.size
-  console.log(`Launching ${total} session(s)...`)
-  const count = await launchSelections(projects, selectedProjects, selectedSessions, selectedBranches)
-  console.log(`Done! ${count} terminal(s) launched.`)
+  await launchSelections(projects, selectedProjects, selectedSessions, selectedBranches)
+  selectedProjects.clear()
+  selectedSessions.clear()
+  selectedBranches.clear()
+  rebuildDisplayRows()
+  updateAll()
 }
 
 // ─── Main ───────────────────────────────────────────────────────────
