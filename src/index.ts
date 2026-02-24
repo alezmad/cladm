@@ -640,18 +640,22 @@ async function handleKeypress(key: KeyEvent) {
       break
 
     case "return": {
-      // Focus idle session from idle panel
+      const hasSelections = selectedProjects.size > 0 || selectedSessions.size > 0
+      // If user has checkmarked items, always launch them
+      if (hasSelections) {
+        doLaunch()
+        break
+      }
+      // Focus idle session from idle panel (only when nothing selected)
       if (bottomPanelMode === "idle" && cachedIdleSessions.length > 0 && idleCursor < cachedIdleSessions.length) {
         const focused = await focusTerminalByPath(cachedIdleSessions[idleCursor].projectPath)
         if (focused) return
       }
-      // If cursor is on a project row with active session and nothing selected, focus it
+      // If cursor is on a project row with active session, focus it
       const returnRow = displayRows[cursor]
       if (
         returnRow.type === "project" &&
-        projects[returnRow.projectIndex].activeSessions > 0 &&
-        selectedProjects.size === 0 &&
-        selectedSessions.size === 0
+        projects[returnRow.projectIndex].activeSessions > 0
       ) {
         const focused = await focusTerminalByPath(projects[returnRow.projectIndex].path)
         if (focused) return
