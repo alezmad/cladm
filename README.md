@@ -56,7 +56,7 @@ cladm detects running Claude Code sessions and shows their real-time status:
 | `◉ 3m` (yellow) | **Idle** — Claude finished 3 min ago, waiting for input |
 | `○` (dim) | No active session |
 
-**How it works:** cladm monitors JSONL file modification times in `~/.claude/projects/`. Sessions writing within 5 seconds are considered busy; otherwise idle. The elapsed time since the last response is shown next to idle indicators.
+**How it works:** cladm reads the tail of each session's JSONL file in `~/.claude/projects/`. A session is considered busy if the file was written within 5 seconds OR the last assistant message contains a pending `tool_use` (meaning Claude is waiting for a tool to finish). This prevents false idle triggers during long-running tool calls and subtasks.
 
 **Sound notification:** When any session transitions from busy → idle, cladm plays a system sound (`Glass.aiff`) so you never miss a completed response — even when working across multiple projects.
 
@@ -116,7 +116,34 @@ Select a branch to launch Claude with a prompt to switch to that branch. Select 
 | `Enter` | Launch selected in Terminal.app |
 | `PageUp` `PageDown` | Jump 15 rows |
 | `Home` `End` | Jump to top/bottom |
+| `i` | Toggle idle sessions panel |
+| `u` | Toggle usage panel |
+| `/` | Filter projects |
 | `q` `Esc` | Quit |
+
+## Shell helper
+
+Add to `~/.zshrc` to focus the cladm window from any terminal:
+
+```sh
+cladm() {
+  local tty=$(ps -eo tty,command | grep 'bun.*src/index.ts' | grep -v grep | awk 'NR==1{print "/dev/tty"$1}')
+  if [ -z "$tty" ]; then echo "cladm not running"; return 1; fi
+  osascript -e "
+tell application \"Terminal\"
+  activate
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is \"$tty\" then
+        set selected of t to true
+        set index of w to 1
+        return
+      end if
+    end repeat
+  end repeat
+end tell"
+}
+```
 
 ## What gets launched
 
