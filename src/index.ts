@@ -21,7 +21,7 @@ import { discoverProjects } from "./data/history"
 import { loadGitMetadata, loadBranches } from "./data/git"
 import { loadSessions } from "./data/sessions"
 import { generateMockProjects, generateMockSessions, generateMockBranches, generateMockBusySessions } from "./data/mock"
-import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, focusTerminalByPath, checkTransitions, snapshotBusy, playDoneSound, getSessionStatus, populateMockSessionStatus, getIdleSessions } from "./data/monitor"
+import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, focusTerminalByPath, checkTransitions, snapshotBusy, playDoneSound, bounceDock, getSessionStatus, populateMockSessionStatus, getIdleSessions } from "./data/monitor"
 import { launchSelections } from "./actions/launcher"
 import type { Project, DisplayRow } from "./lib/types"
 import { timeAgo, formatSize, elapsedCompact } from "./lib/time"
@@ -47,6 +47,8 @@ let monitorInterval: ReturnType<typeof setInterval> | null = null
 let prevBusySnapshot: Map<string, number> = new Map()
 let bottomPanelMode: "preview" | "idle" = "preview"
 let destroyed = false
+let idleCursor = 0
+let cachedIdleSessions: import("./data/monitor").IdleSessionInfo[] = []
 
 // ─── UI Refs ────────────────────────────────────────────────────────
 let renderer: CliRenderer
@@ -261,50 +263,67 @@ function updateColumnHeaders() {
   colHeaderText.content = t`  ${dim(cols)}`
 }
 
-function fmtIdleRow(s: { idleSinceMs: number; projectName: string; sessionTitle: string }) {
+function addIdleRow(s: { idleSinceMs: number; projectName: string; sessionTitle: string; lastPrompt: string; lastResponse: string }, isCursor: boolean) {
   const elapsed = (elapsedCompact(s.idleSinceMs) || "<5s").padEnd(6)
-  const name = (s.projectName.length > 20 ? s.projectName.slice(0, 17) + "..." : s.projectName).padEnd(22)
-  const title = s.sessionTitle.length > 40 ? s.sessionTitle.slice(0, 37) + "..." : s.sessionTitle
-  return t`  ${yellow("◉")} ${dim(elapsed)}${name}${dim('"' + title + '"')}`
+  const name = s.projectName.length > 20 ? s.projectName.slice(0, 17) + "..." : s.projectName
+  const title = s.sessionTitle.length > 50 ? s.sessionTitle.slice(0, 47) + "..." : s.sessionTitle
+  const prompt = s.lastPrompt
+    ? s.lastPrompt.length > 60 ? s.lastPrompt.slice(0, 57) + "..." : s.lastPrompt
+    : "(no text)"
+  const response = s.lastResponse
+    ? s.lastResponse.length > 60 ? s.lastResponse.slice(0, 57) + "..." : s.lastResponse
+    : "(no response)"
+  const pointer = isCursor ? "▸" : " "
+  previewBox.add(Text({ content: t`  ${yellow("◉")} ${isCursor ? cyan(pointer) : dim(pointer)} ${dim(elapsed)}${bold(name)}  ${fg(ACCENT)('"' + title + '"')}`, width: "100%", height: 1 }))
+  previewBox.add(Text({ content: t`       ${dim("│")}  ${dim("You:")} ${fg(ACCENT)('"' + prompt + '"')}`, width: "100%", height: 1 }))
+  previewBox.add(Text({ content: t`       ${dim("│")}  ${dim("Claude:")} ${fg(ACCENT)('"' + response + '"')}`, width: "100%", height: 1 }))
 }
 
 function updateIdlePanel() {
-  const idle = getIdleSessions(projects)
-  const n = idle.length
-  previewBox.title = ` Idle Sessions (${n}) `
+  cachedIdleSessions = getIdleSessions(projects)
+  const n = cachedIdleSessions.length
+  previewBox.title = ` Idle Sessions (${n}) — enter to focus `
+  // Clear all children and rebuild
+  for (const child of previewBox.getChildren()) previewBox.remove(child.id)
   if (n === 0) {
-    previewText.content = t`${dim("  No idle sessions")}`
+    idleCursor = 0
+    previewBox.add(Text({ content: t`${dim("  No idle sessions")}`, width: "100%", height: 1 }))
     return
   }
-  const show = idle.slice(0, 5)
-  const r0 = show[0] ? fmtIdleRow(show[0]) : t``
-  const r1 = show[1] ? fmtIdleRow(show[1]) : null
-  const r2 = show[2] ? fmtIdleRow(show[2]) : null
-  const r3 = show[3] ? fmtIdleRow(show[3]) : null
-  const r4 = show[4] ? fmtIdleRow(show[4]) : null
-  const more = n > 5 ? t`
-    ${dim(`+${n - 5} more`)}` : t``
-  previewText.content = t`    ${dim("TIME".padEnd(6))}${dim("PROJECT".padEnd(22))}${dim("SESSION")}
-${r0}${r1 ? t`
-${r1}` : t``}${r2 ? t`
-${r2}` : t``}${r3 ? t`
-${r3}` : t``}${r4 ? t`
-${r4}` : t``}${more}`
+  if (idleCursor >= n) idleCursor = n - 1
+  const show = cachedIdleSessions.slice(0, 3)
+  for (let i = 0; i < show.length; i++) {
+    addIdleRow(show[i], idleCursor === i)
+  }
+  if (n > 3) {
+    previewBox.add(Text({ content: t`    ${dim(`+${n - 3} more`)}`, width: "100%", height: 1 }))
+  }
 }
 
 function updateBottomPanel() {
   if (bottomPanelMode === "idle") {
+    previewBox.height = 12
     updateIdlePanel()
   } else {
+    // Restore previewText as sole child
+    for (const child of previewBox.getChildren()) previewBox.remove(child.id)
+    previewBox.add(previewText)
+    previewBox.height = 7
     previewBox.title = " Preview "
     updatePreview()
   }
 }
 
 function updateFooter() {
-  footerText.content = t`  ${dim(
-    "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter launch │ q quit"
-  )}`
+  if (bottomPanelMode === "idle" && cachedIdleSessions.length > 0) {
+    footerText.content = t`  ${dim(
+      "↑↓ nav │ tab/shift-tab idle select │ enter focus │ i preview │ space select │ a all │ n none │ s sort │ q quit"
+    )}`
+  } else {
+    footerText.content = t`  ${dim(
+      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter launch │ q quit"
+    )}`
+  }
 }
 
 function updatePreview() {
@@ -432,6 +451,7 @@ function updateAll() {
   updateHeader()
   rebuildList()
   updateBottomPanel()
+  updateFooter()
 }
 
 // ─── Keyboard ───────────────────────────────────────────────────────
@@ -544,6 +564,17 @@ function handleKeypress(key: KeyEvent) {
 
     case "i":
       bottomPanelMode = bottomPanelMode === "preview" ? "idle" : "preview"
+      idleCursor = 0
+      break
+
+    case "tab":
+      if (bottomPanelMode === "idle" && cachedIdleSessions.length > 0) {
+        if (key.shift) {
+          idleCursor = idleCursor > 0 ? idleCursor - 1 : Math.min(cachedIdleSessions.length, 3) - 1
+        } else {
+          idleCursor = (idleCursor + 1) % Math.min(cachedIdleSessions.length, 3)
+        }
+      }
       break
 
     case "s":
@@ -553,6 +584,11 @@ function handleKeypress(key: KeyEvent) {
       break
 
     case "return": {
+      // Focus idle session from idle panel
+      if (bottomPanelMode === "idle" && cachedIdleSessions.length > 0 && idleCursor < cachedIdleSessions.length) {
+        focusTerminalByPath(cachedIdleSessions[idleCursor].projectPath)
+        return
+      }
       // If cursor is on a project row with active session and nothing selected, focus it
       const returnRow = displayRows[cursor]
       if (
@@ -769,16 +805,25 @@ async function main() {
       prevBusySnapshot = snapshotBusy(projects)
       if (transitioned.length > 0) {
         playDoneSound()
+        bounceDock()
         bottomPanelMode = "idle"
       }
       updateAll()
     } else {
       const sessions = await detectActiveSessions()
       const changed = updateProjectSessions(projects, sessions)
+      // Eagerly load session data for active projects (needed for idle panel)
+      for (const p of projects) {
+        if (p.activeSessions > 0 && !p.sessions) {
+          p.sessions = await loadSessions(p.path)
+          p.sessionCount = p.sessions.length
+        }
+      }
       const transitioned = checkTransitions(projects, prevBusySnapshot)
       prevBusySnapshot = snapshotBusy(projects)
       if (transitioned.length > 0) {
         playDoneSound()
+        bounceDock()
         bottomPanelMode = "idle"
       }
       if (changed) updateAll()

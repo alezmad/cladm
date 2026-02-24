@@ -54,9 +54,9 @@ async function extractSessionInfo(
           firstTimestamp = new Date(d.timestamp).getTime()
         }
         if (!branch && d.gitBranch) branch = d.gitBranch
-        if (d.type === "user" && typeof d.message?.content === "string") {
-          title = d.message.content
-          break
+        if (d.type === "user") {
+          const text = extractUserText(d)
+          if (text) { title = text; break }
         }
       } catch {}
     }
@@ -75,12 +75,9 @@ async function extractSessionInfo(
           const ts = new Date(d.timestamp).getTime()
           if (ts > lastTimestamp) lastTimestamp = ts
         }
-        if (
-          !lastUserPrompt &&
-          d.type === "user" &&
-          typeof d.message?.content === "string"
-        ) {
-          lastUserPrompt = d.message.content
+        if (!lastUserPrompt && d.type === "user") {
+          const text = extractUserText(d)
+          if (text) lastUserPrompt = text
         }
         if (!lastAssistantMsg && d.type === "assistant" && Array.isArray(d.message?.content)) {
           for (const block of d.message.content) {
@@ -107,6 +104,25 @@ async function extractSessionInfo(
   } catch {
     return null
   }
+}
+
+const SYSTEM_TAG_RE = /^<(local-command|command-name|command-message|command-args|system-reminder)/
+
+function extractUserText(d: any): string {
+  const content = d.message?.content
+  if (typeof content === "string") {
+    if (SYSTEM_TAG_RE.test(content.trim())) return ""
+    return content
+  }
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block.type === "text" && typeof block.text === "string") {
+        const text = block.text.trim()
+        if (text && !SYSTEM_TAG_RE.test(text)) return text
+      }
+    }
+  }
+  return ""
 }
 
 function cleanText(text: string, maxLen: number): string {

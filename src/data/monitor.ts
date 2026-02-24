@@ -216,6 +216,15 @@ export function playDoneSound(): void {
   })
 }
 
+export function bounceDock(): void {
+  Bun.spawn(["osascript", "-e", 'tell application "System Events" to tell application process "Terminal" to set frontmost to false'], {
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+  // BEL character triggers Terminal dock bounce when not focused
+  process.stdout.write("\x07")
+}
+
 export function getSessionStatus(projectPath: string, sessionId: string): "busy" | "idle" | null {
   const sessions = sessionsByPath.get(projectPath)
   if (!sessions) return null
@@ -254,6 +263,7 @@ export interface IdleSessionInfo {
   idleSinceMs: number
   sessionTitle: string
   lastPrompt: string
+  lastResponse: string
 }
 
 export function getIdleSessions(projects: Project[]): IdleSessionInfo[] {
@@ -267,6 +277,7 @@ export function getIdleSessions(projects: Project[]): IdleSessionInfo[] {
       // Find matching session info for title/prompt
       let title = ""
       let lastPrompt = ""
+      let lastResponse = ""
       if (project.sessions) {
         const match = project.sessions.find(
           ps => s.sessionFile && s.sessionFile.endsWith(`${ps.id}.jsonl`)
@@ -274,6 +285,7 @@ export function getIdleSessions(projects: Project[]): IdleSessionInfo[] {
         if (match) {
           title = match.title
           lastPrompt = match.lastUserPrompt
+          lastResponse = match.lastAssistantMsg
         }
       }
       idle.push({
@@ -283,6 +295,7 @@ export function getIdleSessions(projects: Project[]): IdleSessionInfo[] {
         idleSinceMs: s.lastActivityMs,
         sessionTitle: title || "(session)",
         lastPrompt: lastPrompt || "",
+        lastResponse: lastResponse || "",
       })
     }
   }
