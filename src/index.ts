@@ -46,6 +46,7 @@ let displayRows: DisplayRow[] = []
 let monitorInterval: ReturnType<typeof setInterval> | null = null
 let prevBusySnapshot: Map<string, number> = new Map()
 let bottomPanelMode: "preview" | "idle" = "preview"
+let destroyed = false
 
 // ─── UI Refs ────────────────────────────────────────────────────────
 let renderer: CliRenderer
@@ -183,10 +184,6 @@ function fmtSessionRow(
   const size = formatSize(session.sizeBytes)
 
   const status = getSessionStatus(project.path, session.id)
-  let statusTag: string
-  if (status === "busy") statusTag = green("● running")
-  else if (status === "idle") statusTag = yellow("◉ idle")
-  else statusTag = ""
 
   const promptText = session.lastUserPrompt
     ? session.lastUserPrompt.length > 60
@@ -199,11 +196,23 @@ function fmtSessionRow(
       : session.lastAssistantMsg
     : "(no text response)"
 
-  const statusSuffix = statusTag ? ` ${statusTag}` : ""
-
+  if (status === "busy") {
+    return t`    ${green("●")} ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
+      size.padEnd(7)
+    )} ${fg(ACCENT)('"' + title + '"')} ${green("running")}
+      ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
+      ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
+  }
+  if (status === "idle") {
+    return t`    ${yellow("◉")} ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
+      size.padEnd(7)
+    )} ${fg(ACCENT)('"' + title + '"')} ${yellow("idle")}
+      ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
+      ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
+  }
   return t`      ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
     size.padEnd(7)
-  )} ${fg(ACCENT)('"' + title + '"')}${statusSuffix}
+  )} ${fg(ACCENT)('"' + title + '"')}
       ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
       ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
 }
@@ -561,6 +570,7 @@ function handleKeypress(key: KeyEvent) {
 
     case "q":
     case "escape":
+      destroyed = true
       if (monitorInterval) clearInterval(monitorInterval)
       renderer.destroy()
       return
@@ -743,10 +753,18 @@ async function main() {
   }
 
   monitorInterval = setInterval(async () => {
+    if (destroyed) return
     if (demoMode) {
       for (const p of projects) { p.activeSessions = 0; p.busySessions = 0 }
       generateMockActiveSessions(projects)
       generateMockBusySessions(projects)
+      for (const p of projects) {
+        if (p.activeSessions > 0 && !p.sessions) {
+          p.sessions = generateMockSessions(p.path)
+          p.sessionCount = p.sessions.length
+        }
+        populateMockSessionStatus(p)
+      }
       const transitioned = checkTransitions(projects, prevBusySnapshot)
       prevBusySnapshot = snapshotBusy(projects)
       if (transitioned.length > 0) {
