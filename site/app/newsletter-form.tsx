@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 
-const API_URL = "https://alezmad-nuc.tail58f5ad.ts.net";
-
 export function NewsletterForm({ project = "cladm" }: { project?: string }) {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
@@ -14,7 +12,7 @@ export function NewsletterForm({ project = "cladm" }: { project?: string }) {
     if (!email.trim()) return;
     setStatus("loading");
     try {
-      const res = await fetch(`${API_URL}/subscribe`, {
+      const res = await fetch("/api/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), project }),

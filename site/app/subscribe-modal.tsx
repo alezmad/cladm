@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const API_URL = "https://alezmad-nuc.tail58f5ad.ts.net";
-
 type Phase = "boot" | "prompt" | "sending" | "done";
 
 const BOOT_LINES = [
@@ -86,7 +84,7 @@ export function SubscribeModal() {
     setPhase("sending");
     setError("");
     try {
-      const res = await fetch(`${API_URL}/subscribe`, {
+      const res = await fetch("/api/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), project: "cladm" }),
