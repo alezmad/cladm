@@ -7,8 +7,21 @@
   "bin": {
     "cladm": "src/index.ts"
   },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": ["claude", "claude-code", "tui", "terminal", "launcher", "bun"],
   "license": "MIT",
+  "author": "alezmad",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alezmad/cladm.git"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

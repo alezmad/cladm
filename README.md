@@ -19,16 +19,21 @@
 Requires [Bun](https://bun.sh) >= 1.3.0 and macOS (uses Terminal.app for launching).
 
 ```bash
-# Clone and install
+# Install globally
+bun install -g cladm
+
+# Or run directly
+bunx cladm
+```
+
+### From source (for development)
+
+```bash
 git clone https://github.com/alezmad/cladm.git
 cd cladm
 bun install
-
-# Register the `cladm` command globally
 bun link
 ```
-
-Now you can run `cladm` from anywhere.
 
 ## Usage
 

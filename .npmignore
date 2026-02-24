@@ -1,0 +1,9 @@
+site/
+docs/
+tmp/
+assets/
+node_modules/
+*.lock
+.claude/
+CLAUDE.md
+human-mouse.js
