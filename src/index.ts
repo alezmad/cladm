@@ -22,6 +22,7 @@ import { loadGitMetadata, loadBranches } from "./data/git"
 import { loadSessions } from "./data/sessions"
 import { generateMockProjects, generateMockSessions, generateMockBranches, generateMockBusySessions } from "./data/mock"
 import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, focusTerminalByPath, checkTransitions, snapshotBusy, playDoneSound, bounceDock, getSessionStatus, populateMockSessionStatus, getIdleSessions } from "./data/monitor"
+import { getUsageSummary, formatCost, formatWindow, makeBar, pct, PLAN_LIMITS, type UsageSummary } from "./data/usage"
 import { launchSelections } from "./actions/launcher"
 import type { Project, DisplayRow } from "./lib/types"
 import { timeAgo, formatSize, elapsedCompact } from "./lib/time"
@@ -55,9 +56,12 @@ let renderer: CliRenderer
 let headerText: TextRenderable
 let colHeaderText: TextRenderable
 let listBox: ScrollBoxRenderable
+let bottomRow: BoxRenderable
 let previewBox: BoxRenderable
 let previewText: TextRenderable
+let usageBox: BoxRenderable
 let footerText: TextRenderable
+let cachedUsage: UsageSummary | null = null
 
 // ─── Display Rows ───────────────────────────────────────────────────
 function rebuildDisplayRows() {
@@ -303,16 +307,62 @@ function updateIdlePanel() {
 
 function updateBottomPanel() {
   if (bottomPanelMode === "idle") {
-    previewBox.height = 12
+    bottomRow.height = 14
     updateIdlePanel()
   } else {
     // Restore previewText as sole child
     for (const child of previewBox.getChildren()) previewBox.remove(child.id)
     previewBox.add(previewText)
-    previewBox.height = 7
+    bottomRow.height = 10
     previewBox.title = " Preview "
     updatePreview()
   }
+}
+
+function usageBarColor(p: number) {
+  return p >= 80 ? yellow : p >= 50 ? cyan : green
+}
+
+function updateUsagePanel() {
+  if (destroyed) return
+  for (const child of usageBox.getChildren()) usageBox.remove(child.id)
+
+  if (!cachedUsage) {
+    usageBox.title = " Usage "
+    usageBox.add(Text({ content: t`${dim("Loading...")}`, width: "100%", height: 1 }))
+    return
+  }
+
+  const u = cachedUsage
+  const BAR_W = 18
+
+  // ── Current session ──
+  const sPct = pct(u.totalCost, PLAN_LIMITS.session)
+  const sBar = makeBar(u.totalCost, PLAN_LIMITS.session, BAR_W)
+  const sReset = u.sessionResetMs > 0 ? formatWindow(u.sessionResetMs) : ""
+  usageBox.title = " Usage "
+  usageBox.add(Text({ content: t`${bold("Session")}`, width: "100%", height: 1 }))
+  usageBox.add(Text({ content: t`${usageBarColor(sPct)(sBar)} ${bold(String(sPct) + "%")}`, width: "100%", height: 1 }))
+  usageBox.add(Text({ content: t`${dim(sReset ? "resets " + sReset : "")} ${dim(formatCost(u.costPerHour) + "/h")}`, width: "100%", height: 1 }))
+
+  // ── Weekly all models ──
+  const wPct = pct(u.weekTotal, PLAN_LIMITS.weeklyAll)
+  const wBar = makeBar(u.weekTotal, PLAN_LIMITS.weeklyAll, BAR_W)
+  usageBox.add(Text({ content: t`${bold("All models")} ${dim(formatCost(u.weekTotal))}`, width: "100%", height: 1 }))
+  usageBox.add(Text({ content: t`${usageBarColor(wPct)(wBar)} ${bold(String(wPct) + "%")}`, width: "100%", height: 1 }))
+
+  // ── Weekly sonnet only ──
+  const snPct = pct(u.weeklySonnetCost, PLAN_LIMITS.weeklySonnet)
+  const snBar = makeBar(u.weeklySonnetCost, PLAN_LIMITS.weeklySonnet, BAR_W)
+  usageBox.add(Text({ content: t`${bold("Sonnet")} ${dim(formatCost(u.weeklySonnetCost))}`, width: "100%", height: 1 }))
+  usageBox.add(Text({ content: t`${usageBarColor(snPct)(snBar)} ${bold(String(snPct) + "%")}`, width: "100%", height: 1 }))
+
+  // ── Monthly total ──
+  const monthLabel = new Date().toLocaleString("en", { month: "short" })
+  usageBox.add(Text({ content: t`${bold(monthLabel + " total")} ${dim(formatCost(u.monthlyTotalCost))}`, width: "100%", height: 1 }))
+  usageBox.add(Text({ content: t`${dim(formatCost(u.costPerHour) + "/h avg · " + u.totalRequests + " reqs")}`, width: "100%", height: 1 }))
+
+  renderer.requestRender()
 }
 
 function updateFooter() {
@@ -449,6 +499,7 @@ function ensureCursorVisible() {
 }
 
 function updateAll() {
+  if (destroyed) return
   updateHeader()
   rebuildList()
   updateBottomPanel()
@@ -705,6 +756,10 @@ async function main() {
     exitOnCtrlC: true,
     useAlternateScreen: true,
     useMouse: true,
+    onDestroy: () => {
+      destroyed = true
+      if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null }
+    },
   })
 
   // Build layout
@@ -732,10 +787,16 @@ async function main() {
     viewportCulling: true,
   })
 
-  previewBox = new BoxRenderable(renderer, {
-    height: 7,
+  bottomRow = new BoxRenderable(renderer, {
+    flexDirection: "row",
+    height: 10,
     flexShrink: 0,
     width: "100%",
+  })
+
+  previewBox = new BoxRenderable(renderer, {
+    flexGrow: 1,
+    height: "100%",
     borderStyle: "single",
     border: ["top"],
     borderColor: DIM_CLR,
@@ -752,6 +813,23 @@ async function main() {
   })
   previewBox.add(previewText)
 
+  usageBox = new BoxRenderable(renderer, {
+    width: 34,
+    height: "100%",
+    flexShrink: 0,
+    borderStyle: "single",
+    border: ["top", "left"],
+    borderColor: DIM_CLR,
+    title: " Usage (5h) ",
+    titleAlignment: "left",
+    flexDirection: "column",
+    paddingLeft: 1,
+    paddingRight: 1,
+  })
+
+  bottomRow.add(previewBox)
+  bottomRow.add(usageBox)
+
   footerText = new TextRenderable(renderer, {
     width: "100%",
     height: 1,
@@ -761,7 +839,7 @@ async function main() {
   mainBox.add(headerText)
   mainBox.add(colHeaderText)
   mainBox.add(listBox)
-  mainBox.add(previewBox)
+  mainBox.add(bottomRow)
   mainBox.add(footerText)
 
   renderer.root.add(mainBox)
@@ -770,7 +848,14 @@ async function main() {
   updateColumnHeaders()
   rebuildList()
   updateBottomPanel()
+  updateUsagePanel()
   updateFooter()
+
+  // Load initial usage data
+  getUsageSummary().then(u => {
+    cachedUsage = u
+    updateUsagePanel()
+  }).catch(() => {})
 
   renderer.keyInput.on("keypress", handleKeypress)
 
@@ -794,8 +879,19 @@ async function main() {
     })
   }
 
+  let usageTick = 0
   monitorInterval = setInterval(async () => {
     if (destroyed) return
+
+    // Refresh usage every ~30s (6 ticks of 5s)
+    usageTick++
+    if (usageTick % 6 === 0) {
+      try {
+        cachedUsage = await getUsageSummary()
+        updateUsagePanel()
+      } catch {}
+    }
+
     if (demoMode) {
       for (const p of projects) { p.activeSessions = 0; p.busySessions = 0 }
       generateMockActiveSessions(projects)
