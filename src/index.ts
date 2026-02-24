@@ -125,15 +125,15 @@ function fmtProjectRow(project: Project, isSelected: boolean) {
   if (project.activeSessions > 0) {
     if (project.busySessions > 0) {
       activeDot = green("●")
-      activeTag = project.activeSessions > 1 ? yellow(String(project.activeSessions)) : " "
+      activeTag = project.activeSessions > 1 ? yellow(String(project.activeSessions).padEnd(2)) : "  "
     } else {
       activeDot = yellow("◉")
       const elapsed = elapsedCompact(project.lastActivityMs)
-      activeTag = elapsed ? dim(elapsed.padEnd(2).slice(0, 2)) : " "
+      activeTag = elapsed ? dim(elapsed.padEnd(2).slice(0, 2)) : "  "
     }
   } else {
     activeDot = dim("○")
-    activeTag = " "
+    activeTag = "  "
   }
   const check = isSelected ? green("✓") : " "
   const arrow = project.expanded ? "▼" : "▶"

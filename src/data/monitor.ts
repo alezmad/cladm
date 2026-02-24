@@ -157,18 +157,37 @@ return false`
     const focused = out.trim() === "true"
 
     if (focused) {
-      const ttys = getSessionTtys(projectPath)
-      for (const tty of ttys) {
-        try {
-          await Bun.write(tty, "\x07")
-        } catch {}
-      }
+      flashTerminalByTty(tty)
     }
 
     return focused
   } catch {
     return false
   }
+}
+
+function flashTerminalByTty(tty: string): void {
+  const script = `
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${tty}" then
+        set origBg to background color of t
+        repeat 3 times
+          set background color of t to {12000, 12000, 28000}
+          delay 0.12
+          set background color of t to origBg
+          delay 0.12
+        end repeat
+        return
+      end if
+    end repeat
+  end repeat
+end tell`
+  Bun.spawn(["osascript", "-e", script], {
+    stdout: "ignore",
+    stderr: "ignore",
+  })
 }
 
 export function updateProjectSessions(projects: Project[], sessions: Map<string, number>): boolean {
