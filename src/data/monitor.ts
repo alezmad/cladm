@@ -1,9 +1,10 @@
-import { readdirSync, statSync } from "node:fs"
+import { readdirSync, statSync, openSync, readSync, closeSync } from "node:fs"
 import { join } from "node:path"
 import type { Project, SessionInfo } from "../lib/types"
 
 const PROJECTS_DIR = `${Bun.env.HOME}/.claude/projects`
 const BUSY_THRESHOLD_MS = 5000
+const TAIL_BYTES = 8192 // read last 8KB of JSONL to find final assistant entry
 
 export interface ActiveSession {
   pid: string
@@ -38,6 +39,40 @@ function findActiveJsonl(projectKey: string): { path: string; mtime: number } | 
   } catch {
     return null
   }
+}
+
+// Check if the last assistant message in a JSONL has pending tool_use (= still working)
+function lastAssistantHasToolUse(filePath: string): boolean {
+  try {
+    const st = statSync(filePath)
+    const size = st.size
+    if (size === 0) return false
+    const readSize = Math.min(TAIL_BYTES, size)
+    const buf = Buffer.alloc(readSize)
+    const fd = openSync(filePath, "r")
+    try {
+      readSync(fd, buf, 0, readSize, size - readSize)
+    } finally {
+      closeSync(fd)
+    }
+    const tail = buf.toString("utf-8")
+    const lines = tail.split("\n")
+    // Walk backwards to find last assistant entry
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim()
+      if (!line) continue
+      // Quick pre-check before JSON.parse
+      if (!line.includes('"assistant"')) continue
+      try {
+        const d = JSON.parse(line)
+        if (d.type !== "assistant") continue
+        const content = d.message?.content
+        if (!Array.isArray(content)) continue
+        return content.some((c: any) => c.type === "tool_use")
+      } catch {}
+    }
+  } catch {}
+  return false
 }
 
 function escapeAppleScript(s: string): string {
@@ -176,7 +211,10 @@ export async function detectActiveSessions(): Promise<Map<string, number>> {
         const key = cwdToProjectKey(cwd)
         const jsonl = findActiveJsonl(key)
         const now = Date.now()
-        const busy = jsonl ? (now - jsonl.mtime) < BUSY_THRESHOLD_MS : false
+        // Busy if: actively writing (<5s ago) OR last assistant message has tool_use (waiting for tool)
+        const recentlyWritten = jsonl ? (now - jsonl.mtime) < BUSY_THRESHOLD_MS : false
+        const pendingTool = jsonl ? lastAssistantHasToolUse(jsonl.path) : false
+        const busy = recentlyWritten || pendingTool
 
         return { pid, cwd, tty, sessionFile: jsonl?.path ?? null, busy, lastActivityMs: jsonl?.mtime ?? 0 }
       }
