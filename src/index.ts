@@ -125,11 +125,12 @@ function fmtProjectRow(project: Project, isSelected: boolean) {
   if (project.activeSessions > 0) {
     if (project.busySessions > 0) {
       activeDot = green("●")
-      activeTag = project.activeSessions > 1 ? yellow(String(project.activeSessions).padEnd(2)) : "  "
+      const count = String(project.activeSessions)
+      activeTag = project.activeSessions > 1 ? yellow((count + " ").slice(0, 2)) : "  "
     } else {
       activeDot = yellow("◉")
       const elapsed = elapsedCompact(project.lastActivityMs)
-      activeTag = elapsed ? dim(elapsed.padEnd(2).slice(0, 2)) : "  "
+      activeTag = elapsed ? dim((elapsed + "  ").slice(0, 2)) : "  "
     }
   } else {
     activeDot = dim("○")
@@ -455,7 +456,8 @@ function updateAll() {
 }
 
 // ─── Keyboard ───────────────────────────────────────────────────────
-function handleKeypress(key: KeyEvent) {
+async function handleKeypress(key: KeyEvent) {
+  try {
   const total = displayRows.length
   if (total === 0) return
 
@@ -547,7 +549,10 @@ function handleKeypress(key: KeyEvent) {
       const row = displayRows[cursor]
       const project = projects[row.projectIndex]
       if (project.activeSessions > 0) {
-        focusTerminalByPath(project.path)
+        const sid = row.type === "session" && project.sessions
+          ? project.sessions[row.sessionIndex!]?.id
+          : undefined
+        await focusTerminalByPath(project.path, sid)
       }
       return
     }
@@ -586,8 +591,8 @@ function handleKeypress(key: KeyEvent) {
     case "return": {
       // Focus idle session from idle panel
       if (bottomPanelMode === "idle" && cachedIdleSessions.length > 0 && idleCursor < cachedIdleSessions.length) {
-        focusTerminalByPath(cachedIdleSessions[idleCursor].projectPath)
-        return
+        const focused = await focusTerminalByPath(cachedIdleSessions[idleCursor].projectPath)
+        if (focused) return
       }
       // If cursor is on a project row with active session and nothing selected, focus it
       const returnRow = displayRows[cursor]
@@ -597,8 +602,8 @@ function handleKeypress(key: KeyEvent) {
         selectedProjects.size === 0 &&
         selectedSessions.size === 0
       ) {
-        focusTerminalByPath(projects[returnRow.projectIndex].path)
-        return
+        const focused = await focusTerminalByPath(projects[returnRow.projectIndex].path)
+        if (focused) return
       }
       doLaunch()
       break
@@ -616,6 +621,7 @@ function handleKeypress(key: KeyEvent) {
   }
 
   updateAll()
+  } catch {}
 }
 
 async function expandProject(projectIndex: number) {

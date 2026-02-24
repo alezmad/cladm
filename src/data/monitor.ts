@@ -40,6 +40,88 @@ function findActiveJsonl(projectKey: string): { path: string; mtime: number } | 
   }
 }
 
+function escapeAppleScript(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+async function getTtyViaPsForPids(pids: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>()
+  if (pids.length === 0) return result
+  try {
+    const proc = Bun.spawn(["ps", "-o", "pid=,tty=", "-p", pids.join(",")], {
+      stdout: "pipe",
+      stderr: "ignore",
+    })
+    const text = (await new Response(proc.stdout).text()).trim()
+    await proc.exited
+    for (const line of text.split("\n")) {
+      const parts = line.trim().split(/\s+/)
+      if (parts.length >= 2) {
+        const pid = parts[0]
+        const tty = parts[1]
+        if (tty && tty !== "??" && tty !== "-") {
+          result.set(pid, `/dev/tty${tty}`)
+        }
+      }
+    }
+  } catch {}
+  return result
+}
+
+async function focusTerminalTab(tty: string): Promise<string> {
+  const escaped = escapeAppleScript(tty)
+  try {
+    const proc = Bun.spawn(["osascript", "-e", `
+tell application "Terminal"
+  activate
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${escaped}" then
+        set selected of t to true
+        set index of w to 1
+        return tty of t
+      end if
+    end repeat
+  end repeat
+end tell
+return ""`], {
+      stdout: "pipe",
+      stderr: "ignore",
+    })
+    const out = (await new Response(proc.stdout).text()).trim()
+    await proc.exited
+    return out
+  } catch {
+    return ""
+  }
+}
+
+function flashTerminalByTty(tty: string): void {
+  const escaped = escapeAppleScript(tty)
+  Bun.spawn(["osascript", "-e", `
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${escaped}" then
+        try
+          set origBg to background color of t
+          repeat 3 times
+            set background color of t to {12000, 12000, 28000}
+            delay 0.12
+            set background color of t to origBg
+            delay 0.12
+          end repeat
+        end try
+        return
+      end if
+    end repeat
+  end repeat
+end tell`], {
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+}
+
 export async function detectActiveSessions(): Promise<Map<string, number>> {
   const result = new Map<string, number>()
   sessionsByPath.clear()
@@ -58,6 +140,9 @@ export async function detectActiveSessions(): Promise<Map<string, number>> {
   }
 
   if (pids.length === 0) return result
+
+  // Batch-fetch ttys via ps for all PIDs at once
+  const psTtyMap = await getTtyViaPsForPids(pids)
 
   const infoPromises = pids.map(async (pid): Promise<ActiveSession | null> => {
     try {
@@ -80,6 +165,11 @@ export async function detectActiveSessions(): Promise<Map<string, number>> {
           if (currentFd === "cwd") cwd = val
           else if (currentFd === "0" && val.startsWith("/dev/")) tty = val
         }
+      }
+
+      // Fallback: use pre-fetched ps tty
+      if (!tty) {
+        tty = psTtyMap.get(pid) ?? ""
       }
 
       if (cwd) {
@@ -105,10 +195,17 @@ export async function detectActiveSessions(): Promise<Map<string, number>> {
   return result
 }
 
-export function getSessionTtys(projectPath: string): string[] {
+export function getSessionTtys(projectPath: string, sessionId?: string): string[] {
   const sessions = sessionsByPath.get(projectPath)
   if (!sessions) return []
-  return sessions.map(s => s.tty).filter(Boolean)
+  // If targeting a specific session, return only its tty
+  if (sessionId) {
+    const match = sessions.find(s => s.sessionFile?.endsWith(`${sessionId}.jsonl`))
+    return match?.tty ? [match.tty] : []
+  }
+  // Sort by most recently active first so the best candidate is tried first
+  const sorted = [...sessions].sort((a, b) => b.lastActivityMs - a.lastActivityMs)
+  return sorted.map(s => s.tty).filter(Boolean)
 }
 
 export function getBusyCount(projectPath: string): number {
@@ -127,67 +224,38 @@ export function getLastActivityMs(projectPath: string): number {
   return best
 }
 
-export async function focusTerminalByPath(projectPath: string): Promise<boolean> {
-  const ttys = getSessionTtys(projectPath)
-  if (ttys.length === 0) return false
+export async function focusTerminalByPath(projectPath: string, sessionId?: string): Promise<boolean> {
+  // Collect all candidate ttys: from sessionsByPath first, then ps fallback
+  const triedTtys = new Set<string>()
 
-  const tty = ttys[0]
-  const script = `
-tell application "Terminal"
-  activate
-  repeat with w in windows
-    repeat with t in tabs of w
-      if tty of t is "${tty}" then
-        set selected of t to true
-        set index of w to 1
-        return true
-      end if
-    end repeat
-  end repeat
-end tell
-return false`
-
-  try {
-    const proc = Bun.spawn(["osascript", "-e", script], {
-      stdout: "pipe",
-      stderr: "ignore",
-    })
-    const out = await new Response(proc.stdout).text()
-    await proc.exited
-    const focused = out.trim() === "true"
-
-    if (focused) {
-      flashTerminalByTty(tty)
+  // Try cached ttys from sessionsByPath (sorted by most recent, or filtered to specific session)
+  const cachedTtys = getSessionTtys(projectPath, sessionId)
+  for (const tty of cachedTtys) {
+    triedTtys.add(tty)
+    const matched = await focusTerminalTab(tty)
+    if (matched) {
+      flashTerminalByTty(matched)
+      return true
     }
-
-    return focused
-  } catch {
-    return false
   }
-}
 
-function flashTerminalByTty(tty: string): void {
-  const script = `
-tell application "Terminal"
-  repeat with w in windows
-    repeat with t in tabs of w
-      if tty of t is "${tty}" then
-        set origBg to background color of t
-        repeat 3 times
-          set background color of t to {12000, 12000, 28000}
-          delay 0.12
-          set background color of t to origBg
-          delay 0.12
-        end repeat
-        return
-      end if
-    end repeat
-  end repeat
-end tell`
-  Bun.spawn(["osascript", "-e", script], {
-    stdout: "ignore",
-    stderr: "ignore",
-  })
+  // Fallback: fresh ps lookup for PIDs not already covered
+  const sessions = sessionsByPath.get(projectPath)
+  const pids = sessions?.map(s => s.pid) ?? []
+  if (pids.length === 0) return false
+
+  const psTtyMap = await getTtyViaPsForPids(pids)
+  for (const tty of psTtyMap.values()) {
+    if (triedTtys.has(tty)) continue
+    triedTtys.add(tty)
+    const matched = await focusTerminalTab(tty)
+    if (matched) {
+      flashTerminalByTty(matched)
+      return true
+    }
+  }
+
+  return false
 }
 
 export function updateProjectSessions(projects: Project[], sessions: Map<string, number>): boolean {
