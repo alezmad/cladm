@@ -20,10 +20,10 @@ Requires [Bun](https://bun.sh) >= 1.3.0 and macOS (uses Terminal.app for launchi
 
 ```bash
 # Install globally
-bun install -g cladm
+bun install -g @alezmad/cladm
 
 # Or run directly
-bunx cladm
+bunx @alezmad/cladm
 ```
 
 ### From source (for development)

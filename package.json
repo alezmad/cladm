@@ -1,5 +1,5 @@
 {
-  "name": "cladm",
+  "name": "@alezmad/cladm",
   "version": "0.1.0",
   "description": "TUI launcher for Claude Code sessions",
   "module": "index.ts",
@@ -17,7 +17,7 @@
   "author": "alezmad",
   "repository": {
     "type": "git",
-    "url": "https://github.com/alezmad/cladm.git"
+    "url": "git+https://github.com/alezmad/cladm.git"
   },
   "engines": {
     "bun": ">=1.3.0"
