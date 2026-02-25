@@ -24,6 +24,9 @@ import { generateMockProjects, generateMockSessions, generateMockBranches, gener
 import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, focusTerminalByPath, checkTransitions, snapshotBusy, playDoneSound, bounceDock, getSessionStatus, populateMockSessionStatus, getIdleSessions } from "./data/monitor"
 import { getUsageSummary, formatCost, formatWindow, makeBar, pct, PLAN_LIMITS, type UsageSummary } from "./data/usage"
 import { launchSelections } from "./actions/launcher"
+import { createSession, getSessions, refreshAlive, type TmuxSession } from "./tmux/session-manager"
+import { SessionGrid } from "./components/session-grid"
+import { getProjectColor } from "./components/terminal-view"
 import type { Project, DisplayRow } from "./lib/types"
 import { timeAgo, formatSize, elapsedCompact } from "./lib/time"
 
@@ -50,6 +53,15 @@ let bottomPanelMode: "preview" | "idle" = "preview"
 let destroyed = false
 let idleCursor = 0
 let cachedIdleSessions: import("./data/monitor").IdleSessionInfo[] = []
+
+// ─── Grid Mode State ───────────────────────────────────────────────
+type ViewMode = "picker" | "grid"
+let viewMode: ViewMode = "picker"
+let sessionGrid: SessionGrid | null = null
+let gridContainer: BoxRenderable | null = null
+let gridHeader: TextRenderable | null = null
+let gridFooter: TextRenderable | null = null
+let mainBox: BoxRenderable | null = null
 
 // ─── UI Refs ────────────────────────────────────────────────────────
 let renderer: CliRenderer
@@ -671,6 +683,14 @@ async function handleKeypress(key: KeyEvent) {
       renderer.destroy()
       return
 
+    case "t":
+      // Switch to grid view if there are tmux sessions
+      if (sessionGrid && sessionGrid.paneCount > 0) {
+        switchToGrid()
+        return
+      }
+      return
+
     default:
       return
   }
@@ -714,9 +734,7 @@ async function expandProject(projectIndex: number) {
 
 async function doLaunch() {
   if (selectedProjects.size === 0 && selectedSessions.size === 0) return
-  const total = selectedProjects.size + selectedSessions.size
   if (demoMode) {
-    // Just clear selections in demo mode
     selectedProjects.clear()
     selectedSessions.clear()
     selectedBranches.clear()
@@ -724,12 +742,188 @@ async function doLaunch() {
     updateAll()
     return
   }
-  await launchSelections(projects, selectedProjects, selectedSessions, selectedBranches)
+
+  // Build launch items
+  const items: { path: string; name: string; sessionId?: string; targetBranch?: string }[] = []
+
+  for (const path of selectedProjects) {
+    const project = projects.find(p => p.path === path)
+    if (!project) continue
+    const targetBranch = selectedBranches.get(path)
+    const needsBranch = targetBranch && targetBranch !== project.branch
+    items.push({ path, name: project.name, targetBranch: needsBranch ? targetBranch : undefined })
+  }
+
+  for (const project of projects) {
+    if (!project.sessions) continue
+    for (const session of project.sessions) {
+      if (selectedSessions.has(session.id)) {
+        const targetBranch = selectedBranches.get(project.path)
+        const needsBranch = targetBranch && targetBranch !== project.branch
+        items.push({ path: project.path, name: project.name, sessionId: session.id, targetBranch: needsBranch ? targetBranch : undefined })
+      }
+    }
+  }
+
+  if (items.length === 0) return
+
+  // Create tmux sessions and switch to grid view
+  ensureGridView()
+
+  const termW = process.stdout.columns || 120
+  const termH = process.stdout.rows || 40
+  const n = items.length + (sessionGrid?.paneCount || 0)
+  const cols = n <= 1 ? 1 : n <= 2 ? 2 : n <= 4 ? 2 : 3
+  const rows = Math.ceil(n / cols)
+  const paneW = Math.floor(termW / cols) - 2
+  const paneH = Math.floor((termH - 4) / rows) - 3
+
+  for (const item of items) {
+    const session = await createSession({
+      projectPath: item.path,
+      projectName: item.name,
+      sessionId: item.sessionId,
+      targetBranch: item.targetBranch,
+      width: Math.max(paneW, 20),
+      height: Math.max(paneH, 6),
+    })
+    sessionGrid!.addSession(session)
+  }
+
   selectedProjects.clear()
   selectedSessions.clear()
   selectedBranches.clear()
-  rebuildDisplayRows()
+  updateGridHeader()
+  updateGridFooter()
+  renderer.requestRender()
+}
+
+// ─── Grid View ─────────────────────────────────────────────────────
+function ensureGridView() {
+  if (viewMode === "grid" && sessionGrid) return
+  switchToGrid()
+}
+
+function switchToGrid() {
+  viewMode = "grid"
+  if (mainBox) mainBox.visible = false
+
+  if (!gridContainer) {
+    gridHeader = new TextRenderable(renderer, {
+      width: "100%",
+      height: 1,
+      flexShrink: 0,
+    })
+
+    gridContainer = new BoxRenderable(renderer, {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      flexGrow: 1,
+      width: "100%",
+      overflow: "hidden",
+    })
+
+    gridFooter = new TextRenderable(renderer, {
+      width: "100%",
+      height: 1,
+      flexShrink: 0,
+    })
+
+    const gridRoot = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      width: "100%",
+      height: "100%",
+    })
+    gridRoot.add(gridHeader!)
+    gridRoot.add(gridContainer!)
+    gridRoot.add(gridFooter!)
+    renderer.root.add(gridRoot)
+
+    sessionGrid = new SessionGrid(renderer, gridContainer)
+  }
+
+  if (gridContainer) gridContainer.visible = true
+  if (gridHeader) gridHeader.visible = true
+  if (gridFooter) gridFooter.visible = true
+  updateGridHeader()
+  updateGridFooter()
+  renderer.requestRender()
+}
+
+function switchToPicker() {
+  viewMode = "picker"
+  if (mainBox) mainBox.visible = true
+  if (gridContainer) gridContainer.visible = false
+  if (gridHeader) gridHeader.visible = false
+  if (gridFooter) gridFooter.visible = false
   updateAll()
+  renderer.requestRender()
+}
+
+function updateGridHeader() {
+  if (!gridHeader) return
+  const n = sessionGrid?.paneCount || 0
+  const fi = (sessionGrid?.focusIndex ?? 0) + 1
+  gridHeader.content = t`  ${bold("cladm grid")} — ${String(n)} sessions │ focus: ${String(fi)}/${String(n)}   ${dim("ctrl+` picker │ ctrl+n/p switch │ ctrl+w close")}`
+}
+
+function updateGridFooter() {
+  if (!gridFooter || !sessionGrid) return
+  const pane = sessionGrid.focusedPane
+  if (pane) {
+    const color = getProjectColor(pane.session.colorIndex)
+    gridFooter.content = t`  ${fg(color)("▸")} ${bold(pane.session.projectName)}${pane.session.sessionId ? dim(` #${pane.session.sessionId.slice(0, 8)}`) : ""}   ${dim("all input goes to focused pane")}`
+  } else {
+    gridFooter.content = t`  ${dim("No sessions. Press ctrl+\` to return to picker.")}`
+  }
+}
+
+async function handleGridInput(rawSequence: string): Promise<boolean> {
+  if (viewMode !== "grid") return false
+
+  // Ctrl+` (0x1e) or ESC+` — return to picker
+  if (rawSequence === "\x1e" || rawSequence === "\x1b`") {
+    switchToPicker()
+    return true
+  }
+
+  // Ctrl+N — focus next pane
+  if (rawSequence === "\x0e") {
+    sessionGrid?.focusNext()
+    updateGridHeader()
+    updateGridFooter()
+    return true
+  }
+
+  // Ctrl+P — focus previous pane
+  if (rawSequence === "\x10") {
+    sessionGrid?.focusPrev()
+    updateGridHeader()
+    updateGridFooter()
+    return true
+  }
+
+  // Ctrl+W — close focused pane
+  if (rawSequence === "\x17") {
+    const pane = sessionGrid?.focusedPane
+    if (pane) {
+      const { killSession } = await import("./tmux/session-manager")
+      sessionGrid!.removeSession(pane.session.name)
+      await killSession(pane.session.name)
+      updateGridHeader()
+      updateGridFooter()
+      if (sessionGrid!.paneCount === 0) {
+        switchToPicker()
+      }
+    }
+    return true
+  }
+
+  // Forward everything else to the focused tmux pane
+  if (sessionGrid) {
+    await sessionGrid.sendInputToFocused(rawSequence)
+  }
+  return true
 }
 
 // ─── Main ───────────────────────────────────────────────────────────
@@ -767,7 +961,7 @@ async function main() {
   })
 
   // Build layout
-  const mainBox = new BoxRenderable(renderer, {
+  mainBox = new BoxRenderable(renderer, {
     flexDirection: "column",
     width: "100%",
     height: "100%",
@@ -861,6 +1055,14 @@ async function main() {
     updateUsagePanel()
   }).catch(() => {})
 
+  // Intercept raw input for grid mode (before OpenTUI processes it)
+  renderer.prependInputHandler((sequence: string) => {
+    if (viewMode !== "grid") return false
+    // Handle grid input asynchronously, consume the event
+    handleGridInput(sequence)
+    return true
+  })
+
   renderer.keyInput.on("keypress", handleKeypress)
 
   // Live session monitoring
@@ -933,6 +1135,18 @@ async function main() {
         bottomPanelMode = "idle"
       }
       if (changed) updateAll()
+
+      // Update grid pane statuses (flash idle sessions)
+      if (sessionGrid && viewMode === "grid") {
+        await refreshAlive()
+        for (const [, s] of getSessions()) {
+          // Use monitor.ts to check busy/idle
+          const status = getSessionStatus(s.projectPath, s.sessionId)
+          if (status === "idle") sessionGrid.markIdle(s.name)
+          else if (status === "busy") sessionGrid.markBusy(s.name)
+          else sessionGrid.clearMark(s.name)
+        }
+      }
     }
   }, 5000)
 }
