@@ -63,6 +63,12 @@ export async function createSession(opts: {
   }
 
   sessions.set(name, session)
+
+  // Enable mouse mode so clicks/scrolls forward to the application
+  Bun.spawn(["tmux", "set", "-t", name, "mouse", "on"], {
+    stdout: "ignore", stderr: "ignore",
+  })
+
   return session
 }
 

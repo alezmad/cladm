@@ -24,9 +24,9 @@ import { generateMockProjects, generateMockSessions, generateMockBranches, gener
 import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, focusTerminalByPath, checkTransitions, snapshotBusy, playDoneSound, bounceDock, getSessionStatus, populateMockSessionStatus, getIdleSessions } from "./data/monitor"
 import { getUsageSummary, formatCost, formatWindow, makeBar, pct, PLAN_LIMITS, type UsageSummary } from "./data/usage"
 import { launchSelections } from "./actions/launcher"
-import { createSession, getSessions, refreshAlive, type TmuxSession } from "./tmux/session-manager"
-import { SessionGrid } from "./components/session-grid"
-import { getProjectColor } from "./components/terminal-view"
+import { createSession, getSessions, refreshAlive, type PtySession } from "./pty/session-manager"
+import { stopAllCaptures } from "./pty/capture"
+import { DirectGridRenderer } from "./components/direct-grid"
 import type { Project, DisplayRow } from "./lib/types"
 import { timeAgo, formatSize, elapsedCompact } from "./lib/time"
 
@@ -57,11 +57,9 @@ let cachedIdleSessions: import("./data/monitor").IdleSessionInfo[] = []
 // ─── Grid Mode State ───────────────────────────────────────────────
 type ViewMode = "picker" | "grid"
 let viewMode: ViewMode = "picker"
-let sessionGrid: SessionGrid | null = null
-let gridContainer: BoxRenderable | null = null
-let gridHeader: TextRenderable | null = null
-let gridFooter: TextRenderable | null = null
+let directGrid: DirectGridRenderer | null = null
 let mainBox: BoxRenderable | null = null
+let rawStdoutWrite: (s: string) => boolean
 
 // ─── UI Refs ────────────────────────────────────────────────────────
 let renderer: CliRenderer
@@ -384,7 +382,7 @@ function updateFooter() {
     )}`
   } else {
     footerText.content = t`  ${dim(
-      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter launch │ q quit"
+      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter grid │ o external │ q quit"
     )}`
   }
 }
@@ -518,6 +516,82 @@ function updateAll() {
   updateFooter()
 }
 
+// ─── Mouse Parsing ──────────────────────────────────────────────────
+interface MouseEvent { btn: number; col: number; row: number; release: boolean }
+
+function parseMouseEvent(seq: string): MouseEvent | null {
+  // SGR encoding: \x1b[<btn;col;rowM (press) or \x1b[<btn;col;rowm (release)
+  const sgr = seq.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/)
+  if (sgr) {
+    return {
+      btn: parseInt(sgr[1]),
+      col: parseInt(sgr[2]),
+      row: parseInt(sgr[3]),
+      release: sgr[4] === "m",
+    }
+  }
+
+  // Legacy X10/normal encoding: \x1b[M followed by 3 bytes (btn+32, col+32, row+32)
+  if (seq.length >= 6 && seq.startsWith("\x1b[M")) {
+    const raw = seq.charCodeAt(3) - 32
+    const col = seq.charCodeAt(4) - 32
+    const row = seq.charCodeAt(5) - 32
+    // In legacy mode, btn 3 = release, lower 2 bits = button
+    const release = (raw & 3) === 3
+    const btn = release ? 0 : (raw & 3)
+    // Scroll: bit 6 set means scroll. 64 = scroll up, 65 = scroll down
+    const scroll = raw & 64
+    return { btn: scroll ? (raw & 67) : btn, col, row, release: release && !scroll }
+  }
+
+  return null
+}
+
+// ─── Mouse ──────────────────────────────────────────────────────────
+function hitTestListRow(screenRow: number): number {
+  // List starts at row 2 (header=0, colHeader=1)
+  const listStartY = 2
+  const relY = screenRow - listStartY + listBox.scrollTop
+  if (relY < 0) return -1
+
+  let y = 0
+  for (let i = 0; i < displayRows.length; i++) {
+    const h = displayRows[i].type === "session" ? 3 : 1
+    if (relY >= y && relY < y + h) return i
+    y += h
+  }
+  return -1
+}
+
+function handlePickerClick(_col: number, screenRow: number) {
+  const idx = hitTestListRow(screenRow)
+  if (idx < 0 || idx >= displayRows.length) return
+
+  cursor = idx
+  const row = displayRows[idx]
+  const project = projects[row.projectIndex]
+
+  // Toggle selection (same as space key)
+  if (row.type === "project" || row.type === "new-session") {
+    const path = project.path
+    if (selectedProjects.has(path)) selectedProjects.delete(path)
+    else selectedProjects.add(path)
+  } else if (row.type === "session") {
+    const session = project.sessions![row.sessionIndex!]
+    if (selectedSessions.has(session.id)) selectedSessions.delete(session.id)
+    else selectedSessions.add(session.id)
+  } else if (row.type === "branch") {
+    const path = project.path
+    if (selectedBranches.get(path) === row.branchName) {
+      selectedBranches.delete(path)
+    } else {
+      selectedBranches.set(path, row.branchName!)
+    }
+  }
+
+  updateAll()
+}
+
 // ─── Keyboard ───────────────────────────────────────────────────────
 async function handleKeypress(key: KeyEvent) {
   try {
@@ -597,7 +671,6 @@ async function handleKeypress(key: KeyEvent) {
           selectedBranches.set(path, row.branchName!)
         }
       }
-      if (cursor < total - 1) cursor++
       break
     }
 
@@ -676,16 +749,36 @@ async function handleKeypress(key: KeyEvent) {
       break
     }
 
+    case "o": {
+      // Open selected projects in external Terminal.app windows
+      const hasOSel = selectedProjects.size > 0 || selectedSessions.size > 0
+      if (!hasOSel) {
+        // If nothing selected, select current row's project
+        const oRow = displayRows[cursor]
+        if (oRow) selectedProjects.add(projects[oRow.projectIndex].path)
+      }
+      if (selectedProjects.size > 0 || selectedSessions.size > 0) {
+        await launchSelections(projects, selectedProjects, selectedSessions, selectedBranches)
+        selectedProjects.clear()
+        selectedSessions.clear()
+        selectedBranches.clear()
+      }
+      break
+    }
+
     case "q":
     case "escape":
       destroyed = true
       if (monitorInterval) clearInterval(monitorInterval)
+      stopAllCaptures()
+      process.stdout.write("\x1b[?1006l")
+      process.stdout.write("\x1b[?1000l")
       renderer.destroy()
       return
 
     case "t":
-      // Switch to grid view if there are tmux sessions
-      if (sessionGrid && sessionGrid.paneCount > 0) {
+      // Switch to grid view if there are panes
+      if (directGrid && directGrid.paneCount > 0) {
         switchToGrid()
         return
       }
@@ -751,7 +844,13 @@ async function doLaunch() {
     if (!project) continue
     const targetBranch = selectedBranches.get(path)
     const needsBranch = targetBranch && targetBranch !== project.branch
-    items.push({ path, name: project.name, targetBranch: needsBranch ? targetBranch : undefined })
+    // Auto-resume most recent session (loaded lazily if needed)
+    if (!project.sessions) {
+      project.sessions = await loadSessions(project.path)
+      project.sessionCount = project.sessions.length
+    }
+    const lastSessionId = project.sessions[0]?.id
+    items.push({ path, name: project.name, sessionId: lastSessionId, targetBranch: needsBranch ? targetBranch : undefined })
   }
 
   for (const project of projects) {
@@ -767,16 +866,17 @@ async function doLaunch() {
 
   if (items.length === 0) return
 
-  // Create tmux sessions and switch to grid view
+  // Create PTY sessions and switch to grid view
   ensureGridView()
 
+  // DirectGridRenderer calculates pane sizes internally
   const termW = process.stdout.columns || 120
   const termH = process.stdout.rows || 40
-  const n = items.length + (sessionGrid?.paneCount || 0)
-  const cols = n <= 1 ? 1 : n <= 2 ? 2 : n <= 4 ? 2 : 3
-  const rows = Math.ceil(n / cols)
-  const paneW = Math.floor(termW / cols) - 2
-  const paneH = Math.floor((termH - 4) / rows) - 3
+  const totalPanes = items.length + (directGrid?.paneCount || 0)
+  const cols = totalPanes <= 1 ? 1 : totalPanes <= 2 ? 2 : totalPanes <= 4 ? 2 : 3
+  const rows = Math.ceil(totalPanes / cols)
+  const paneW = Math.max(Math.floor(termW / cols) - 2, 20)
+  const paneH = Math.max(Math.floor((termH - 2) / rows) - 4, 6)
 
   for (const item of items) {
     const session = await createSession({
@@ -784,102 +884,76 @@ async function doLaunch() {
       projectName: item.name,
       sessionId: item.sessionId,
       targetBranch: item.targetBranch,
-      width: Math.max(paneW, 20),
-      height: Math.max(paneH, 6),
+      width: paneW,
+      height: paneH,
     })
-    sessionGrid!.addSession(session)
+    await directGrid!.addPane(session)
   }
 
   selectedProjects.clear()
   selectedSessions.clear()
   selectedBranches.clear()
-  updateGridHeader()
-  updateGridFooter()
-  renderer.requestRender()
 }
 
-// ─── Grid View ─────────────────────────────────────────────────────
+// ─── Grid View (Direct Renderer) ────────────────────────────────────
 function ensureGridView() {
-  if (viewMode === "grid" && sessionGrid) return
+  if (viewMode === "grid" && directGrid) return
   switchToGrid()
 }
 
 function switchToGrid() {
   viewMode = "grid"
-  if (mainBox) mainBox.visible = false
 
-  if (!gridContainer) {
-    gridHeader = new TextRenderable(renderer, {
-      width: "100%",
-      height: 1,
-      flexShrink: 0,
-    })
-
-    gridContainer = new BoxRenderable(renderer, {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      flexGrow: 1,
-      width: "100%",
-      overflow: "hidden",
-    })
-
-    gridFooter = new TextRenderable(renderer, {
-      width: "100%",
-      height: 1,
-      flexShrink: 0,
-    })
-
-    const gridRoot = new BoxRenderable(renderer, {
-      flexDirection: "column",
-      width: "100%",
-      height: "100%",
-    })
-    gridRoot.add(gridHeader!)
-    gridRoot.add(gridContainer!)
-    gridRoot.add(gridFooter!)
-    renderer.root.add(gridRoot)
-
-    sessionGrid = new SessionGrid(renderer, gridContainer)
+  if (!directGrid) {
+    directGrid = new DirectGridRenderer(rawStdoutWrite)
   }
 
-  if (gridContainer) gridContainer.visible = true
-  if (gridHeader) gridHeader.visible = true
-  if (gridFooter) gridFooter.visible = true
-  updateGridHeader()
-  updateGridFooter()
-  renderer.requestRender()
+  // Suspend OpenTUI render loop — this pauses stdin, exits raw mode, disables mouse
+  renderer.suspend()
+
+  // Restore terminal state for direct rendering
+  if (process.stdin.isTTY) process.stdin.setRawMode(true)
+  process.stdin.resume()  // Re-enable stdin data events (suspend pauses them)
+  rawStdoutWrite("\x1b[?1049h")  // Alternate screen
+  // Enable mouse reporting in grid mode — only for scroll wheel and click-to-focus.
+  // With direct PTY (no tmux), mouse events stay in our stdin handler and never leak to subprocesses.
+  rawStdoutWrite("\x1b[?1000h")  // Basic mouse tracking (clicks + scroll)
+  rawStdoutWrite("\x1b[?1006h")  // SGR extended mouse coordinates
+  directGrid.start()
 }
 
 function switchToPicker() {
   viewMode = "picker"
+  if (directGrid) {
+    if (directGrid.selectMode) directGrid.exitSelectMode()
+    if (directGrid.paneCount > 0) directGrid.stop()
+  }
+  // Resume OpenTUI — it will re-enter alternate screen and redraw
+  renderer.resume()
+  // Remove any data listeners OpenTUI re-adds during resume (we handle stdin ourselves)
+  process.stdin.removeAllListeners("data")
+  process.stdin.on("data", stdinHandler)
+  // Re-enable mouse reporting (resume may not restore it)
+  process.stdout.write("\x1b[?1000h")
+  process.stdout.write("\x1b[?1006h")
   if (mainBox) mainBox.visible = true
-  if (gridContainer) gridContainer.visible = false
-  if (gridHeader) gridHeader.visible = false
-  if (gridFooter) gridFooter.visible = false
   updateAll()
   renderer.requestRender()
 }
 
-function updateGridHeader() {
-  if (!gridHeader) return
-  const n = sessionGrid?.paneCount || 0
-  const fi = (sessionGrid?.focusIndex ?? 0) + 1
-  gridHeader.content = t`  ${bold("cladm grid")} — ${String(n)} sessions │ focus: ${String(fi)}/${String(n)}   ${dim("ctrl+` picker │ ctrl+n/p switch │ ctrl+w close")}`
-}
-
-function updateGridFooter() {
-  if (!gridFooter || !sessionGrid) return
-  const pane = sessionGrid.focusedPane
-  if (pane) {
-    const color = getProjectColor(pane.session.colorIndex)
-    gridFooter.content = t`  ${fg(color)("▸")} ${bold(pane.session.projectName)}${pane.session.sessionId ? dim(` #${pane.session.sessionId.slice(0, 8)}`) : ""}   ${dim("all input goes to focused pane")}`
-  } else {
-    gridFooter.content = t`  ${dim("No sessions. Press ctrl+\` to return to picker.")}`
-  }
+function resizeGridPanes() {
+  if (!directGrid || directGrid.paneCount === 0) return
+  directGrid.repositionAll()
 }
 
 async function handleGridInput(rawSequence: string): Promise<boolean> {
-  if (viewMode !== "grid") return false
+  if (viewMode !== "grid" || !directGrid) return false
+
+  // Esc — collapse expanded pane back to grid
+  if (rawSequence === "\x1b" && directGrid.isExpanded) {
+    directGrid.collapsePane()
+    return true
+  }
 
   // Ctrl+` (0x1e) or ESC+` — return to picker
   if (rawSequence === "\x1e" || rawSequence === "\x1b`") {
@@ -889,40 +963,50 @@ async function handleGridInput(rawSequence: string): Promise<boolean> {
 
   // Ctrl+N — focus next pane
   if (rawSequence === "\x0e") {
-    sessionGrid?.focusNext()
-    updateGridHeader()
-    updateGridFooter()
+    directGrid.focusNext()
     return true
   }
 
   // Ctrl+P — focus previous pane
   if (rawSequence === "\x10") {
-    sessionGrid?.focusPrev()
-    updateGridHeader()
-    updateGridFooter()
+    directGrid.focusPrev()
+    return true
+  }
+
+  // Ctrl+F — open focused pane's project in Finder
+  if (rawSequence === "\x06") {
+    const pane = directGrid.focusedPane
+    if (pane) Bun.spawn(["open", pane.session.projectPath])
     return true
   }
 
   // Ctrl+W — close focused pane
   if (rawSequence === "\x17") {
-    const pane = sessionGrid?.focusedPane
+    const pane = directGrid.focusedPane
     if (pane) {
-      const { killSession } = await import("./tmux/session-manager")
-      sessionGrid!.removeSession(pane.session.name)
+      if (directGrid.isExpanded) directGrid.collapsePane()
+      const { killSession } = await import("./pty/session-manager")
+      directGrid.removePane(pane.session.name)
       await killSession(pane.session.name)
-      updateGridHeader()
-      updateGridFooter()
-      if (sessionGrid!.paneCount === 0) {
+      if (directGrid.paneCount === 0) {
         switchToPicker()
       }
     }
     return true
   }
 
-  // Forward everything else to the focused tmux pane
-  if (sessionGrid) {
-    await sessionGrid.sendInputToFocused(rawSequence)
+  // PageUp / PageDown (Fn+Up/Down on Mac) — scroll focused pane
+  if (rawSequence === "\x1b[5~") {
+    directGrid.sendScrollToFocused("up")
+    return true
   }
+  if (rawSequence === "\x1b[6~") {
+    directGrid.sendScrollToFocused("down")
+    return true
+  }
+
+  // Forward everything else to the focused PTY pane
+  directGrid.sendInputToFocused(rawSequence)
   return true
 }
 
@@ -950,15 +1034,24 @@ async function main() {
   sortedIndices = projects.map((_, i) => i)
   rebuildDisplayRows()
 
+  // Save raw stdout.write BEFORE OpenTUI intercepts it
+  rawStdoutWrite = process.stdout.write.bind(process.stdout) as (s: string) => boolean
+
   renderer = await createCliRenderer({
     exitOnCtrlC: true,
     useAlternateScreen: true,
-    useMouse: true,
+    useMouse: false, // We handle mouse ourselves to avoid OpenTUI consuming events
     onDestroy: () => {
       destroyed = true
       if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null }
+      if (directGrid) directGrid.destroyAll()
+      stopAllCaptures()
     },
   })
+
+  // Enable mouse reporting manually (SGR mode for full coordinates)
+  process.stdout.write("\x1b[?1000h") // Basic click tracking
+  process.stdout.write("\x1b[?1006h") // SGR extended coordinates
 
   // Build layout
   mainBox = new BoxRenderable(renderer, {
@@ -1055,15 +1148,273 @@ async function main() {
     updateUsagePanel()
   }).catch(() => {})
 
-  // Intercept raw input for grid mode (before OpenTUI processes it)
-  renderer.prependInputHandler((sequence: string) => {
-    if (viewMode !== "grid") return false
-    // Handle grid input asynchronously, consume the event
-    handleGridInput(sequence)
-    return true
+  // Resize PTY panes when terminal window is resized
+  process.stdout.on("resize", () => {
+    if (viewMode !== "grid" || !directGrid) return
+    resizeGridPanes()
   })
 
-  renderer.keyInput.on("keypress", handleKeypress)
+  // Shift+arrow sequences across terminal emulators
+  const SHIFT_ARROWS: Record<string, "up" | "down" | "left" | "right"> = {
+    "\x1b[1;2A": "up",    // xterm/iTerm2/most terminals
+    "\x1b[1;2B": "down",
+    "\x1b[1;2C": "right",
+    "\x1b[1;2D": "left",
+    "\x1b[a": "up",       // rxvt
+    "\x1b[b": "down",
+    "\x1b[c": "right",
+    "\x1b[d": "left",
+  }
+
+  // Take over stdin completely — removes OpenTUI's data listeners
+  // We parse all keys ourselves to avoid double-processing issues
+  process.stdin.removeAllListeners("data")
+
+  // Extract only safe keyboard input from stdin data.
+  // WHITELIST approach: only recognized keyboard sequences pass through.
+  // Everything else (mouse events, terminal responses, OSC, DCS, etc.) is dropped.
+  function extractKeyboardInput(data: string): string {
+    let keyboard = ""
+    let i = 0
+
+    while (i < data.length) {
+      const c = data.charCodeAt(i)
+
+      // ESC sequences
+      if (c === 0x1b) {
+        if (i + 1 >= data.length) { keyboard += "\x1b"; i++; continue } // lone ESC = Escape key
+
+        const next = data[i + 1]
+
+        // OSC: \x1b] ... (terminated by BEL \x07 or ST \x1b\\) — drop entirely
+        if (next === "]") {
+          let j = i + 2
+          while (j < data.length) {
+            if (data[j] === "\x07") { j++; break }
+            if (data[j] === "\x1b" && j + 1 < data.length && data[j + 1] === "\\") { j += 2; break }
+            j++
+          }
+          i = j; continue
+        }
+
+        // DCS: \x1bP ... ST  |  APC: \x1b_ ... ST  |  PM: \x1b^ ... ST — drop entirely
+        if (next === "P" || next === "_" || next === "^") {
+          let j = i + 2
+          while (j < data.length) {
+            if (data[j] === "\x1b" && j + 1 < data.length && data[j + 1] === "\\") { j += 2; break }
+            j++
+          }
+          i = j; continue
+        }
+
+        // CSI: \x1b[
+        if (next === "[") {
+          let j = i + 2
+          // Consume parameter bytes (0x30-0x3F: digits, ;, <, =, >, ?)
+          while (j < data.length && data.charCodeAt(j) >= 0x30 && data.charCodeAt(j) <= 0x3F) j++
+          // Consume intermediate bytes (0x20-0x2F)
+          while (j < data.length && data.charCodeAt(j) >= 0x20 && data.charCodeAt(j) <= 0x2F) j++
+          // Final byte (0x40-0x7E)
+          if (j < data.length && data.charCodeAt(j) >= 0x40 && data.charCodeAt(j) <= 0x7E) {
+            const final = data[j]
+            // Legacy X10 mouse: \x1b[M followed by 3 raw bytes (btn+32, col+32, row+32)
+            // Must consume the 3 payload bytes or they leak as keyboard input
+            // (btn+32 for left click = 0x20 = ASCII space!)
+            if (final === "M" && j === i + 2) {
+              i = Math.min(j + 4, data.length); continue
+            }
+            // ONLY keep: arrows (A-D), Home (H), End (F), shift-tab (Z), function keys (~)
+            if ("ABCDHFZ~".includes(final)) {
+              keyboard += data.slice(i, j + 1)
+            }
+            i = j + 1; continue
+          }
+          // Incomplete/malformed CSI — drop
+          i = j; continue
+        }
+
+        // SS3: \x1bO + letter (F1-F4, keypad)
+        if (next === "O" && i + 2 < data.length) {
+          keyboard += data.slice(i, i + 3)
+          i += 3; continue
+        }
+
+        // \x1b` (ctrl+backtick) — keep as keyboard shortcut
+        if (next === "`") {
+          keyboard += "\x1b`"
+          i += 2; continue
+        }
+
+        // Any other \x1b+char — drop (unknown escape sequence)
+        i += 2; continue
+      }
+
+      // Regular character: printable ASCII, control chars, UTF-8 — keep
+      keyboard += data[i]
+      i++
+    }
+
+    return keyboard
+  }
+
+  // Parse SGR mouse events from raw data. Returns array of {btn, col, row, release, consumed}.
+  function extractMouseEvents(data: string): { btn: number, col: number, row: number, release: boolean, start: number, end: number }[] {
+    const events: { btn: number, col: number, row: number, release: boolean, start: number, end: number }[] = []
+    const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g
+    let m
+    while ((m = re.exec(data)) !== null) {
+      events.push({
+        btn: parseInt(m[1]),
+        col: parseInt(m[2]),
+        row: parseInt(m[3]),
+        release: m[4] === "m",
+        start: m.index,
+        end: m.index + m[0].length,
+      })
+    }
+    return events
+  }
+
+  function stdinHandler(data: string | Buffer) {
+    const str = typeof data === "string" ? data : data.toString("utf8")
+
+    if (viewMode === "grid" && directGrid) {
+      // In select mode, only listen for Esc to exit — everything else is native terminal
+      if (directGrid.selectMode) {
+        const keyboard = extractKeyboardInput(str)
+        if (keyboard === "\x1b") {
+          directGrid.exitSelectMode()
+        }
+        return
+      }
+
+      // Handle mouse events first (scroll wheel + click-to-focus)
+      const mouseEvents = extractMouseEvents(str)
+      for (const me of mouseEvents) {
+        // Scroll: btn 64 = scroll up, btn 65 = scroll down
+        if (me.btn === 64) {
+          directGrid.sendScrollToFocused("up", 3)
+          continue
+        }
+        if (me.btn === 65) {
+          directGrid.sendScrollToFocused("down", 3)
+          continue
+        }
+        // Click (btn 0, press only): check buttons first, then focus pane
+        if (me.btn === 0 && !me.release) {
+          const btn = directGrid.checkButtonClick(me.col, me.row)
+          if (btn?.action === "max") {
+            directGrid.expandPane(btn.paneIndex)
+          } else if (btn?.action === "min") {
+            directGrid.collapsePane()
+          } else if (btn?.action === "sel") {
+            directGrid.enterSelectMode()
+          } else {
+            directGrid.focusByClick(me.col, me.row)
+          }
+          continue
+        }
+      }
+
+      // Strip mouse events from the data before keyboard filtering
+      let stripped = str
+      // Remove mouse events from end to start to preserve indices
+      for (let i = mouseEvents.length - 1; i >= 0; i--) {
+        const me = mouseEvents[i]
+        stripped = stripped.slice(0, me.start) + stripped.slice(me.end)
+      }
+
+      const keyboard = extractKeyboardInput(stripped)
+      if (keyboard) {
+        const dir = SHIFT_ARROWS[keyboard]
+        if (dir) {
+          directGrid.focusByDirection(dir)
+        } else {
+          handleGridInput(keyboard)
+        }
+      }
+      return
+    }
+
+    // Picker mode: handle mouse clicks (scroll + click-to-select)
+    const pickerMouse = extractMouseEvents(str)
+    for (const me of pickerMouse) {
+      if (me.btn === 0 && !me.release) handlePickerClick(me.col, me.row)
+      if (me.btn === 64) { if (cursor > 0) { cursor--; updateAll() } }
+      if (me.btn === 65) { if (cursor < displayRows.length - 1) { cursor++; updateAll() } }
+    }
+
+    // Parse keys directly (bypass OpenTUI pipeline to avoid double-firing)
+    const keyboard = extractKeyboardInput(str)
+    if (!keyboard) return
+
+    // Map raw sequences to KeyEvent-like objects and call handleKeypress directly
+    const keyMap: Record<string, { name: string; shift?: boolean; ctrl?: boolean }> = {
+      "\x1b[A": { name: "up" },
+      "\x1b[B": { name: "down" },
+      "\x1b[C": { name: "right" },
+      "\x1b[D": { name: "left" },
+      "\x1b[5~": { name: "pageup" },
+      "\x1b[6~": { name: "pagedown" },
+      "\x1b[H": { name: "home" },
+      "\x1b[F": { name: "end" },
+      "\x1bOH": { name: "home" },
+      "\x1bOF": { name: "end" },
+      "\x1b[Z": { name: "tab", shift: true },
+      "\x1b[1;2A": { name: "up", shift: true },
+      "\x1b[1;2B": { name: "down", shift: true },
+      "\x1b[1;2C": { name: "right", shift: true },
+      "\x1b[1;2D": { name: "left", shift: true },
+      "\x09": { name: "tab" },
+      "\x0d": { name: "return" },
+      "\x1b": { name: "escape" },
+      " ": { name: "space" },
+    }
+
+    // Parse sequences from the keyboard string
+    let ki = 0
+    while (ki < keyboard.length) {
+      let matched = false
+      // Try longest match first (up to 8 chars for CSI sequences)
+      for (let len = Math.min(8, keyboard.length - ki); len >= 1; len--) {
+        const seq = keyboard.slice(ki, ki + len)
+        const mapped = keyMap[seq]
+        if (mapped) {
+          const syntheticKey = {
+            name: mapped.name,
+            shift: mapped.shift || false,
+            ctrl: mapped.ctrl || false,
+            meta: false,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+          } as KeyEvent
+          handleKeypress(syntheticKey)
+          ki += len
+          matched = true
+          break
+        }
+      }
+      if (!matched) {
+        // Single printable character
+        const ch = keyboard[ki]
+        const code = ch.charCodeAt(0)
+        // Map printable ASCII to key name
+        if (code >= 0x21 && code <= 0x7e) {
+          const syntheticKey = {
+            name: ch,
+            shift: false,
+            ctrl: false,
+            meta: false,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+          } as KeyEvent
+          handleKeypress(syntheticKey)
+        }
+        ki++
+      }
+    }
+  }
+  process.stdin.on("data", stdinHandler)
 
   // Live session monitoring
   if (demoMode) {
@@ -1137,14 +1488,13 @@ async function main() {
       if (changed) updateAll()
 
       // Update grid pane statuses (flash idle sessions)
-      if (sessionGrid && viewMode === "grid") {
+      if (directGrid && viewMode === "grid") {
         await refreshAlive()
         for (const [, s] of getSessions()) {
-          // Use monitor.ts to check busy/idle
           const status = getSessionStatus(s.projectPath, s.sessionId)
-          if (status === "idle") sessionGrid.markIdle(s.name)
-          else if (status === "busy") sessionGrid.markBusy(s.name)
-          else sessionGrid.clearMark(s.name)
+          if (status === "idle") directGrid.markIdle(s.name)
+          else if (status === "busy") directGrid.markBusy(s.name)
+          else directGrid.clearMark(s.name)
         }
       }
     }

@@ -6,7 +6,7 @@ import {
   RGBA,
   TextAttributes,
 } from "@opentui/core"
-import { capturePane, hasChanged, resetHash } from "../tmux/capture"
+import { startCapture, stopCapture, setCaptureRate, onFrame, hasChanged, resetHash, type CaptureResult } from "../tmux/capture"
 import { parseAnsiFrame, type ParsedFrame } from "../tmux/ansi-parser"
 import type { TmuxSession } from "../tmux/session-manager"
 
@@ -28,34 +28,52 @@ export function getProjectColor(colorIndex: number): string {
   return PROJECT_COLORS[colorIndex % PROJECT_COLORS.length]
 }
 
+// Push-based terminal view: no poll timers.
+// Subscribes to capture stream and renders only when content changes.
 export class TerminalView extends FrameBufferRenderable {
   session: TmuxSession | null = null
-  private pollTimer: ReturnType<typeof setInterval> | null = null
+  private unsubCapture: (() => void) | null = null
   private lastFrame: ParsedFrame | null = null
   private _focused = false
-  private _flashUntil = 0  // timestamp until which border flashes
+  private _flashUntil = 0
   private _idleSince = 0
+  private _frameDirty = false
 
   constructor(ctx: RenderContext, options: FrameBufferOptions) {
     super(ctx, options)
   }
 
   get focused() { return this._focused }
-  set focused(v: boolean) { this._focused = v }
+  set focused(v: boolean) {
+    if (this._focused === v) return
+    this._focused = v
+    // Focused pane captures at ~60fps, unfocused at ~5fps
+    if (this.session) {
+      setCaptureRate(this.session.name, v ? 16 : 200)
+    }
+  }
 
   get idleSince() { return this._idleSince }
 
   attach(session: TmuxSession) {
     this.detach()
     this.session = session
-    resetHash()
-    this.startPolling()
+    resetHash(session.name)
+    const captureMs = this._focused ? 16 : 200
+    startCapture(session.name, captureMs)
+    // Subscribe to push notifications — no poll timer needed
+    this.unsubCapture = onFrame(session.name, (frame) => this.onNewFrame(frame))
   }
 
   detach() {
-    this.stopPolling()
+    if (this.unsubCapture) { this.unsubCapture(); this.unsubCapture = null }
+    if (this.session) {
+      stopCapture(this.session.name)
+      resetHash(this.session.name)
+    }
     this.session = null
     this.lastFrame = null
+    this._frameDirty = false
   }
 
   flash(durationMs = 2000) {
@@ -70,29 +88,19 @@ export class TerminalView extends FrameBufferRenderable {
     this._idleSince = 0
   }
 
-  private startPolling() {
-    if (this.pollTimer) return
-    this.pollTimer = setInterval(() => this.refresh(), 80)
+  // Hint that input was sent — request immediate render
+  nudge() {
+    this.requestRender()
   }
 
-  private stopPolling() {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer)
-      this.pollTimer = null
-    }
-  }
-
-  private async refresh() {
+  private onNewFrame(result: CaptureResult) {
     if (!this.session) return
-
-    const result = await capturePane(this.session.name)
-    if (!result) return
-
-    if (!hasChanged(result.lines)) return
+    if (!hasChanged(result.lines, this.session.name)) return
 
     const frame = parseAnsiFrame(result.lines, result.width, result.height)
     this.lastFrame = frame
-    this.renderFrameToBuffer(frame)
+    this._frameDirty = true
+    this.requestRender()
   }
 
   private renderFrameToBuffer(frame: ParsedFrame) {
@@ -113,17 +121,20 @@ export class TerminalView extends FrameBufferRenderable {
     }
   }
 
+  // Only write to framebuffer when content actually changed (dirty flag)
+  // Previously this re-rendered EVERY paint cycle — major CPU waste
   protected renderSelf(buffer: OptimizedBuffer) {
-    if (this.lastFrame) {
+    if (this._frameDirty && this.lastFrame) {
       this.renderFrameToBuffer(this.lastFrame)
+      this._frameDirty = false
     }
     super.renderSelf(buffer)
   }
 
   protected onResize(width: number, height: number) {
     super.onResize(width, height)
+    this._frameDirty = true // Re-render frame to new buffer size
     if (this.session) {
-      // Resize tmux pane to match (async, fire-and-forget)
       import("../tmux/session-manager").then(m => {
         if (this.session) m.resizePane(this.session.name, width, height)
       })

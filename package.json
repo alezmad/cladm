@@ -29,6 +29,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@opentui/core": "^0.1.81"
+    "@opentui/core": "^0.1.81",
+    "node-pty": "^1.1.0"
   }
 }

@@ -1,4 +1,5 @@
 import type { Project } from "../lib/types"
+import { loadSessions } from "../data/sessions"
 
 interface LaunchItem {
   path: string
@@ -19,7 +20,16 @@ export async function launchSelections(
     const targetBranch = selectedBranches.get(path)
     const project = projects.find(p => p.path === path)
     const needsBranch = targetBranch && project && targetBranch !== project.branch
-    byProject.get(path)!.push({ path, targetBranch: needsBranch ? targetBranch : undefined })
+    // Auto-resume most recent session
+    let lastSessionId: string | undefined
+    if (project) {
+      if (!project.sessions) {
+        project.sessions = await loadSessions(project.path)
+        project.sessionCount = project.sessions.length
+      }
+      lastSessionId = project.sessions[0]?.id
+    }
+    byProject.get(path)!.push({ path, sessionId: lastSessionId, targetBranch: needsBranch ? targetBranch : undefined })
   }
 
   for (const project of projects) {

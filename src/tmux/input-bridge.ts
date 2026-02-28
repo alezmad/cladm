@@ -1,31 +1,77 @@
-// Forwards raw terminal input sequences to a tmux session
+// Forwards raw terminal input to tmux sessions via a persistent shell.
+// Zero process-spawn overhead per keystroke — writes to stdin of a long-lived sh.
 
-export async function sendKeys(sessionName: string, rawSequence: string): Promise<void> {
-  // Use -l for literal text to avoid tmux key-name interpretation
-  // But special keys need to be sent without -l
+import type { Subprocess } from "bun"
+
+let shell: Subprocess<"ignore", "pipe", "ignore"> | null = null
+
+function getShell() {
+  if (shell && !shell.killed) return shell
+  shell = Bun.spawn(["sh"], {
+    stdin: "pipe",
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+  return shell
+}
+
+export function sendKeys(sessionName: string, rawSequence: string): void {
+  const sh = getShell()
   const special = mapSpecialSequence(rawSequence)
 
+  let cmd: string
   if (special) {
-    const proc = Bun.spawn(["tmux", "send-keys", "-t", sessionName, special], {
-      stdout: "ignore", stderr: "ignore",
-    })
-    await proc.exited
+    cmd = `tmux send-keys -t '${sessionName}' ${special}\n`
   } else {
-    // Literal text - send as hex to avoid escaping issues
-    const hexBytes = [...rawSequence].map(c => {
-      const code = c.charCodeAt(0)
-      return code.toString(16).padStart(2, "0")
-    })
-    const proc = Bun.spawn(["tmux", "send-keys", "-t", sessionName, "-H", ...hexBytes], {
-      stdout: "ignore", stderr: "ignore",
-    })
-    await proc.exited
+    const hex = [...rawSequence].map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ")
+    cmd = `tmux send-keys -t '${sessionName}' -H ${hex}\n`
   }
+
+  sh.stdin.write(cmd)
+}
+
+// Forward mouse events to tmux as SGR escape sequences
+export function sendMouseEvent(sessionName: string, x: number, y: number, btn: number, release: boolean): void {
+  const sh = getShell()
+  const end = release ? "m" : "M"
+  const seq = `\x1b[<${btn};${x};${y}${end}`
+  const hex = [...seq].map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ")
+  const cmd = `tmux send-keys -t '${sessionName}' -H ${hex}\n`
+  sh.stdin.write(cmd)
+}
+
+// Scroll a tmux pane using copy-mode (works with any application in the pane)
+export function sendScroll(sessionName: string, direction: "up" | "down", lines = 3): void {
+  const sh = getShell()
+  if (direction === "up") {
+    // Enter copy mode (no-op if already in it) then scroll up
+    sh.stdin.write(`tmux copy-mode -t '${sessionName}' 2>/dev/null; tmux send-keys -t '${sessionName}' -X -N ${lines} scroll-up 2>/dev/null\n`)
+  } else {
+    // Scroll down in copy mode; if we hit bottom, exit copy mode
+    sh.stdin.write(`tmux send-keys -t '${sessionName}' -X -N ${lines} scroll-down 2>/dev/null\n`)
+  }
+}
+
+// Exit copy mode (e.g., when user starts typing)
+export function exitCopyMode(sessionName: string): void {
+  const sh = getShell()
+  sh.stdin.write(`tmux send-keys -t '${sessionName}' -X cancel 2>/dev/null\n`)
+}
+
+export function cleanupInputQueue(_sessionName: string) {
+  // No per-session cleanup needed with shared shell
+}
+
+export function destroyShell() {
+  if (shell && !shell.killed) {
+    shell.stdin.end()
+    shell.kill()
+  }
+  shell = null
 }
 
 // Map known ANSI escape sequences to tmux key names
 function mapSpecialSequence(seq: string): string | null {
-  // Common escape sequences -> tmux key names
   const MAP: Record<string, string> = {
     "\r": "Enter",
     "\n": "Enter",
