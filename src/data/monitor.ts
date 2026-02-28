@@ -312,15 +312,33 @@ export function updateProjectSessions(projects: Project[], sessions: Map<string,
   return changed
 }
 
+const IDLE_SOUND_DELAY_MS = 10_000
+const pendingIdle = new Map<string, number>()  // path → timestamp when first went idle
+
 export function checkTransitions(
   projects: Project[],
   prevBusy: Map<string, number>
 ): string[] {
+  const now = Date.now()
   const transitioned: string[] = []
   for (const project of projects) {
     const prev = prevBusy.get(project.path) || 0
-    if (prev > 0 && project.busySessions === 0 && project.activeSessions > 0) {
-      transitioned.push(project.name)
+    const isIdle = project.busySessions === 0 && project.activeSessions > 0
+
+    if (prev > 0 && isIdle && !pendingIdle.has(project.path)) {
+      // Just transitioned busy→idle — start the delay timer
+      pendingIdle.set(project.path, now)
+    }
+
+    if (pendingIdle.has(project.path)) {
+      if (!isIdle) {
+        // Went busy again — false alarm, cancel
+        pendingIdle.delete(project.path)
+      } else if (now - pendingIdle.get(project.path)! >= IDLE_SOUND_DELAY_MS) {
+        // Confirmed idle for 10+ seconds
+        transitioned.push(project.name)
+        pendingIdle.delete(project.path)
+      }
     }
   }
   return transitioned

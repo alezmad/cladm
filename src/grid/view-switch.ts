@@ -48,6 +48,11 @@ export function createNewGridTab(): number {
   const tabId = app.nextTabId++
   const tab = { id: tabId, name: `Tab ${tabId}` }
   app.gridTabs.push(tab)
+  app.gridTabs.sort((a, b) => {
+    const na = parseInt(a.name.replace(/\D/g, "")) || 0
+    const nb = parseInt(b.name.replace(/\D/g, "")) || 0
+    return na - nb
+  })
 
   if (!app.directGrid) {
     app.directGrid = new DirectGridRenderer(app.rawStdoutWrite)

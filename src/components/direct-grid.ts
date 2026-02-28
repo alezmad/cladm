@@ -85,6 +85,8 @@ export class DirectGridRenderer {
   // Tab bar hit-test regions (col ranges for each tab)
   private tabBarHitRegions: { tabId: number, startCol: number, endCol: number }[] = []
   private tabBarAddBtnCol = -1
+  // Pane list hit-test regions (row 2)
+  private paneListHitRegions: { tabId: number, paneIndex: number, startCol: number, endCol: number }[] = []
 
   constructor(rawWrite: (s: string) => boolean) {
     this.writeRaw = rawWrite
@@ -279,6 +281,10 @@ export class DirectGridRenderer {
     return this.tabPanes.get(tabId)?.length ?? 0
   }
 
+  getTabPanes(tabId: number): readonly GridPaneInfo[] {
+    return this.tabPanes.get(tabId) ?? []
+  }
+
   hasIdleInTab(tabId: number): boolean {
     const panes = this.tabPanes.get(tabId)
     if (!panes) return false
@@ -286,7 +292,7 @@ export class DirectGridRenderer {
   }
 
   // Check if a click hit a button on the top border. Returns action + pane index.
-  checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab", paneIndex: number, tabId?: number } | null {
+  checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab" | "panefocus", paneIndex: number, tabId?: number } | null {
     // Tab bar check (row 1)
     if (row === 1) {
       for (const region of this.tabBarHitRegions) {
@@ -296,6 +302,15 @@ export class DirectGridRenderer {
       }
       if (this.tabBarAddBtnCol > 0 && col >= this.tabBarAddBtnCol && col <= this.tabBarAddBtnCol + 2) {
         return { action: "newtab", paneIndex: -1 }
+      }
+      return null
+    }
+    // Pane list check (row 2)
+    if (row === 2) {
+      for (const region of this.paneListHitRegions) {
+        if (col >= region.startCol && col <= region.endCol) {
+          return { action: "panefocus", paneIndex: region.paneIndex, tabId: region.tabId }
+        }
       }
       return null
     }
@@ -410,35 +425,7 @@ export class DirectGridRenderer {
   }
 
   focusByDirection(dir: "up" | "down" | "left" | "right") {
-    if (this.isSoftExpanded) {
-      // In soft expand: left/right toggles between expanded and strips
-      const sei = this._softExpandIndex
-      const strips = this.panes.map((_, i) => i).filter(i => i !== sei)
-      if (strips.length === 0) return
-
-      if (dir === "left" || dir === "right") {
-        if (dir === "right" && this._focusIndex === sei) {
-          this.setFocus(strips[0]!)
-        } else if (dir === "left" && this._focusIndex !== sei) {
-          this.setFocus(sei)
-        } else {
-          const curStripIdx = strips.indexOf(this._focusIndex)
-          const nextIdx = (curStripIdx + 1) % strips.length
-          this.setFocus(strips[nextIdx]!)
-        }
-        return
-      }
-      // Up/down navigates within strips
-      if (this._focusIndex === sei) {
-        this.setFocus(strips[0]!)
-        return
-      }
-      const curStripIdx = strips.indexOf(this._focusIndex)
-      if (dir === "down") this.setFocus(strips[(curStripIdx + 1) % strips.length]!)
-      else this.setFocus(strips[(curStripIdx - 1 + strips.length) % strips.length]!)
-      return
-    }
-
+    // Weighted grid keeps same positions — use standard grid nav for both modes
     const n = this.panes.length
     if (n <= 1) return
     const { cols } = this.calcGrid(n)
@@ -477,12 +464,13 @@ export class DirectGridRenderer {
     if (n === 0) return false
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
+    const chromeTop = 4
     const { cols } = this.calcGrid(n)
     const rows = Math.ceil(n / cols)
     const cellW = Math.floor(termW / cols)
-    const cellH = Math.floor((termH - 2) / rows)
+    const cellH = Math.floor((termH - chromeTop - 1) / rows)
     const gc = Math.floor((col - 1) / cellW)
-    const gr = Math.floor((row - 2) / cellH)
+    const gr = Math.floor((row - chromeTop) / cellH)
     const idx = gr * cols + gc
     if (idx >= 0 && idx < n) {
       this.setFocus(idx)
@@ -508,12 +496,13 @@ export class DirectGridRenderer {
     if (n === 0) return -1
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
+    const chromeTop = 4
     const { cols } = this.calcGrid(n)
     const rows = Math.ceil(n / cols)
     const cellW = Math.floor(termW / cols)
-    const cellH = Math.floor((termH - 2) / rows)
+    const cellH = Math.floor((termH - chromeTop - 1) / rows)
     const gc = Math.floor((col - 1) / cellW)
-    const gr = Math.floor((row - 2) / cellH)
+    const gr = Math.floor((row - chromeTop) / cellH)
     const idx = gr * cols + gc
     return (idx >= 0 && idx < n) ? idx : -1
   }
@@ -530,7 +519,10 @@ export class DirectGridRenderer {
     // Tab bar (row 1)
     out += this.drawTabBar(termW)
 
-    // Header (row 2)
+    // Pane list (row 2)
+    out += this.drawPaneList(termW)
+
+    // Header (row 3)
     const n = this.panes.length
     const fi = this._focusIndex + 1
     let headerLeft: string, headerRight: string
@@ -547,7 +539,7 @@ export class DirectGridRenderer {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${n} sessions │ focus: ${fi}/${n}`
       headerRight = `${DIM}shift+arrows nav │ click ${BOLD}[MAX]${RESET}${DIM} expand │ ctrl+space picker │ ctrl+w close${RESET}`
     }
-    out += `\x1b[2;1H\x1b[${termW}X${headerLeft}   ${headerRight}`
+    out += `\x1b[3;1H\x1b[${termW}X${headerLeft}   ${headerRight}`
 
     // Pane borders + titles
     if (this.isExpanded) {
@@ -619,6 +611,45 @@ export class DirectGridRenderer {
     out += `${DIM}[+]${RESET}`
     this.tabBarAddBtnCol = col
     col += 3
+
+    return out
+  }
+
+  private drawPaneList(termW: number): string {
+    this.paneListHitRegions = []
+    let out = `\x1b[2;1H\x1b[${termW}X  `
+    let col = 3
+
+    // Show panes across all tabs, grouped by tab
+    for (const tab of app.gridTabs) {
+      const tabPanes = this.tabPanes.get(tab.id) ?? []
+      if (tabPanes.length === 0) continue
+
+      for (let pi = 0; pi < tabPanes.length; pi++) {
+        const pane = tabPanes[pi]!
+        const isFocused = this._activeTabId === tab.id && this._focusIndex === pi
+        const name = pane.session.projectName
+        const short = name.length > 14 ? name.slice(0, 12) + "…" : name
+        const color = getColor(pane.session.colorIndex)
+
+        const startCol = col
+        if (isFocused) {
+          out += `${hexFg(color)}${BOLD}${short}${RESET}`
+        } else {
+          out += `${DIM}${short}${RESET}`
+        }
+        col += short.length
+        this.paneListHitRegions.push({ tabId: tab.id, paneIndex: pi, startCol, endCol: col - 1 })
+
+        if (pi < tabPanes.length - 1) {
+          out += `${DIM} · ${RESET}`
+          col += 3
+        }
+      }
+
+      out += `${DIM}  │  ${RESET}`
+      col += 5
+    }
 
     return out
   }
@@ -786,7 +817,7 @@ export class DirectGridRenderer {
     const n = count ?? this.panes.length
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
-    const chromeTop = 3 // row 1 = tab bar, row 2 = header, content starts row 3
+    const chromeTop = 4 // row 1 = tab bar, row 2 = pane list, row 3 = header, content starts row 4
     const { cols, rows } = this.calcGrid(n)
     const cellW = Math.floor(termW / cols)
     const cellH = Math.floor((termH - chromeTop - 1) / rows) // -1 for footer
@@ -812,7 +843,7 @@ export class DirectGridRenderer {
   repositionAll() {
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
-    const chromeTop = 3
+    const chromeTop = 4
 
     if (this.isExpanded) {
       // Fullscreen: expanded pane gets all space
@@ -824,38 +855,49 @@ export class DirectGridRenderer {
       resizeCapture(pane.session.name, Math.max(contentW, 10), Math.max(contentH, 2))
       resetHash(`dp_${pane.session.name}`)
     } else if (this.isSoftExpanded) {
-      // Soft expand: 70/30 split
+      // Weighted grid: focused pane's col/row get 70%, others split the rest
       const sei = this._softExpandIndex
       const n = this.panes.length
-      const availH = termH - chromeTop - 1  // available rows for content
+      const { cols, rows } = this.calcGrid(n)
+      const focusCol = sei % cols
+      const focusRow = Math.floor(sei / cols)
       const availW = termW
+      const availH = termH - chromeTop - 1
 
-      // Expanded pane: 70% width, full height
-      const expandedW = Math.max(Math.floor(availW * 0.7) - 2, 20)
-      const expandedH = Math.max(availH - 4, 2)
-      const expandedPane = this.panes[sei]!
-      expandedPane.directPane.reposition(2, chromeTop + 3, expandedW, expandedH)
-      resizeSession(expandedPane.session.name, expandedW, expandedH)
-      resizeCapture(expandedPane.session.name, expandedW, expandedH)
-      resetHash(`dp_${expandedPane.session.name}`)
+      // Compute column widths: focused col gets 70%, others split 30%
+      const colWidths: number[] = []
+      const otherCols = cols - 1
+      const focusColW = otherCols > 0 ? Math.floor(availW * 0.7) : availW
+      const otherColW = otherCols > 0 ? Math.floor((availW - focusColW) / otherCols) : 0
+      for (let c = 0; c < cols; c++) colWidths.push(c === focusCol ? focusColW : otherColW)
 
-      // Strip panes: 30% width, stacked vertically
-      const strips = this.panes.map((_, i) => i).filter(i => i !== sei)
-      if (strips.length > 0) {
-        const stripX = 2 + expandedW + 2  // after expanded pane + border
-        const stripW = Math.max(availW - expandedW - 4, 10) // remaining width minus borders
-        const stripCellH = Math.floor(availH / strips.length)
+      // Compute row heights: focused row gets 70%, others split 30%
+      const rowHeights: number[] = []
+      const otherRows = rows - 1
+      const focusRowH = otherRows > 0 ? Math.floor(availH * 0.7) : availH
+      const otherRowH = otherRows > 0 ? Math.floor((availH - focusRowH) / otherRows) : 0
+      for (let r = 0; r < rows; r++) rowHeights.push(r === focusRow ? focusRowH : otherRowH)
 
-        for (let si = 0; si < strips.length; si++) {
-          const pi = strips[si]!
-          const pane = this.panes[pi]!
-          const stripH = Math.max(stripCellH - 4, 2)
-          const stripY = chromeTop + si * stripCellH + 3
-          pane.directPane.reposition(stripX, stripY, stripW, stripH)
-          resizeSession(pane.session.name, stripW, stripH)
-          resizeCapture(pane.session.name, stripW, stripH)
-          resetHash(`dp_${pane.session.name}`)
-        }
+      // Compute column X offsets
+      const colX: number[] = [0]
+      for (let c = 1; c < cols; c++) colX.push(colX[c - 1]! + colWidths[c - 1]!)
+
+      // Compute row Y offsets
+      const rowY: number[] = [0]
+      for (let r = 1; r < rows; r++) rowY.push(rowY[r - 1]! + rowHeights[r - 1]!)
+
+      for (let i = 0; i < n; i++) {
+        const gc = i % cols
+        const gr = Math.floor(i / cols)
+        const contentW = Math.max(colWidths[gc]! - 2, 10)
+        const contentH = Math.max(rowHeights[gr]! - 4, 2)
+        const screenX = colX[gc]! + 2
+        const screenY = chromeTop + rowY[gr]! + 3
+        const pane = this.panes[i]!
+        pane.directPane.reposition(screenX, screenY, contentW, contentH)
+        resizeSession(pane.session.name, contentW, contentH)
+        resizeCapture(pane.session.name, contentW, contentH)
+        resetHash(`dp_${pane.session.name}`)
       }
     } else {
       // Equal grid

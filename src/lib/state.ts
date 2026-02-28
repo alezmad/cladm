@@ -52,6 +52,7 @@ export const app = {
   renderer: null as unknown as CliRenderer,
   headerText: null as unknown as TextRenderable,
   tabBarText: null as unknown as TextRenderable,
+  paneListText: null as unknown as TextRenderable,
   colHeaderText: null as unknown as TextRenderable,
   listBox: null as unknown as ScrollBoxRenderable,
   bottomRow: null as unknown as BoxRenderable,

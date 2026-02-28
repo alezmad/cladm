@@ -533,12 +533,18 @@ function processGridInput(str: string) {
         }
       }
       else if (btn?.action === "newtab") createNewGridTab()
+      else if (btn?.action === "panefocus" && btn.tabId !== undefined) {
+        // Click on pane name in pane list → switch to that tab and focus the pane
+        switchToGridTab(btn.tabId)
+        dg.setFocus(btn.paneIndex)
+        if (app.clickExpand) dg.softExpandPane(btn.paneIndex)
+      }
       else {
         // Pane body click
         if (app.clickExpand && !dg.isExpanded) {
           const clickedIdx = dg.getPaneIndexAtClick(me.col, me.row)
-          if (clickedIdx >= 0) {
-            dg.toggleSoftExpand(clickedIdx)
+          if (clickedIdx >= 0 && clickedIdx !== dg.focusIndex) {
+            dg.softExpandPane(clickedIdx)
           }
         } else {
           dg.focusByClick(me.col, me.row)

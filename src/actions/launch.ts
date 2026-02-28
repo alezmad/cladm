@@ -65,7 +65,14 @@ export async function doLaunch() {
       targetTabId = createNewGridTab()
       // Rename to match the picker tab number
       const tab = app.gridTabs.find(t => t.id === targetTabId)
-      if (tab) tab.name = `Tab ${tabNum}`
+      if (tab) {
+        tab.name = `Tab ${tabNum}`
+        app.gridTabs.sort((a, b) => {
+          const na = parseInt(a.name.replace(/\D/g, "")) || 0
+          const nb = parseInt(b.name.replace(/\D/g, "")) || 0
+          return na - nb
+        })
+      }
     }
 
     const termW = process.stdout.columns || 120

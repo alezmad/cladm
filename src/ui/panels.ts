@@ -69,6 +69,44 @@ export function applySortMode() {
 
 // ─── Tab bar ─────────────────────────────────────────────────────────
 
+const PANE_COLORS = [
+  "#7aa2f7", "#9ece6a", "#e0af68", "#f7768e", "#bb9af7",
+  "#7dcfff", "#ff9e64", "#c0caf5", "#73daca", "#b4f9f8",
+]
+
+export function updatePaneList() {
+  if (!app.paneListText) return
+  if (!app.directGrid || app.gridTabs.length === 0) {
+    app.paneListText.content = ""
+    return
+  }
+
+  let content = t`  `
+  let first = true
+  for (const tab of app.gridTabs) {
+    const tabPanes = app.directGrid.getTabPanes(tab.id)
+    if (tabPanes.length === 0) continue
+
+    for (let pi = 0; pi < tabPanes.length; pi++) {
+      const pane = tabPanes[pi]!
+      const name = pane.session.projectName
+      const short = name.length > 14 ? name.slice(0, 12) + "…" : name
+      const isFocused = app.directGrid!.activeTabId === tab.id && app.directGrid!.focusIndex === pi
+
+      if (!first) content = t`${content}${dim(" · ")}`
+      if (isFocused) {
+        content = t`${content}${bold(short)}`
+      } else {
+        content = t`${content}${dim(short)}`
+      }
+      first = false
+    }
+    content = t`${content}${dim("  │  ")}`
+    first = true
+  }
+  app.paneListText.content = content
+}
+
 export function updateTabBar() {
   if (!app.tabBarText) return
 
@@ -363,6 +401,7 @@ function clearChildren(box: { getChildren(): { id: string }[]; remove(id: string
 export function updateAll() {
   if (app.destroyed) return
   updateTabBar()
+  updatePaneList()
   updateHeader()
   rebuildList()
   updateBottomPanel()
