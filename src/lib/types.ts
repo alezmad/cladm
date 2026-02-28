@@ -46,3 +46,24 @@ export interface DisplayRow {
   sessionIndex?: number
   branchName?: string
 }
+
+export interface SavedPane {
+  projectPath: string
+  projectName: string
+  sessionId?: string
+  targetBranch?: string
+}
+
+export interface SavedTab {
+  id: number
+  name: string
+  panes: SavedPane[]
+}
+
+export interface SavedSession {
+  version: 1
+  savedAt: number
+  activeTabIndex: number
+  nextTabId: number
+  tabs: SavedTab[]
+}
