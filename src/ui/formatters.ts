@@ -22,7 +22,7 @@ export function fmtSyncIndicator(ahead: number, behind: number): string {
   return parts.join("")
 }
 
-const TAB_COLORS = [
+export const TAB_COLORS = [
   cyan,      // 1
   green,     // 2
   yellow,    // 3
@@ -33,6 +33,33 @@ const TAB_COLORS = [
   (s: string) => fg("#73daca")(s),  // 8
   (s: string) => fg("#b4f9f8")(s),  // 9
 ]
+
+function getGridTabBadges(projectPath: string): string {
+  if (!app.directGrid || app.gridTabs.length === 0) return ""
+  const badges: string[] = []
+  for (const tab of app.gridTabs) {
+    const panes = app.directGrid.getTabPanes(tab.id)
+    if (panes.some(p => p.session.projectPath === projectPath)) {
+      const displayIdx = app.gridTabs.indexOf(tab) + 1
+      const color = TAB_COLORS[(displayIdx - 1) % TAB_COLORS.length]!
+      badges.push(color(`T${displayIdx}`))
+    }
+  }
+  return badges.length > 0 ? badges.join("") + " " : ""
+}
+
+function getSessionGridTabBadge(projectPath: string, sessionId: string): string {
+  if (!app.directGrid || app.gridTabs.length === 0) return ""
+  for (const tab of app.gridTabs) {
+    const panes = app.directGrid.getTabPanes(tab.id)
+    if (panes.some(p => p.session.projectPath === projectPath && p.session.sessionId === sessionId)) {
+      const displayIdx = app.gridTabs.indexOf(tab) + 1
+      const color = TAB_COLORS[(displayIdx - 1) % TAB_COLORS.length]!
+      return " " + color(`T${displayIdx}`)
+    }
+  }
+  return ""
+}
 
 function fmtTabCheck(tabNum: number | undefined) {
   if (tabNum === undefined) return " "
@@ -83,7 +110,8 @@ export function fmtProjectRow(project: import("../lib/types").Project, isSelecte
   else if (ca.includes("d ago")) claudeCol = green(ca.padEnd(9))
   else claudeCol = dim(ca.padEnd(9))
 
-  return t` ${activeDot}${activeTag}[${check}] ${dim(arrow)} ${name.padEnd(28)} ${magenta(branch.padEnd(9))}${syncCol}${dim(
+  const gridBadge = getGridTabBadges(project.path)
+  return t` ${activeDot}${activeTag}${gridBadge}[${check}] ${dim(arrow)} ${name.padEnd(28)} ${magenta(branch.padEnd(9))}${syncCol}${dim(
     (project.commitAge || "-").padEnd(10)
   )}${(project.commitMsg || "-").padEnd(22)}${dirtyCol}${claudeCol}${dim(
     String(project.sessionCount).padStart(3)
@@ -120,17 +148,19 @@ export function fmtSessionRow(
       : session.lastAssistantMsg
     : "(no text response)"
 
+  const tabBadge = session.id ? getSessionGridTabBadge(project.path, session.id) : ""
+
   if (status === "busy") {
     return t`    ${green("●")} ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
       size.padEnd(7)
-    )} ${fg(ACCENT)('"' + title + '"')} ${green("running")}
+    )} ${fg(ACCENT)('"' + title + '"')} ${green("running")}${tabBadge}
       ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
       ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
   }
   if (status === "idle") {
     return t`    ${yellow("◉")} ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
       size.padEnd(7)
-    )} ${fg(ACCENT)('"' + title + '"')} ${yellow("idle")}
+    )} ${fg(ACCENT)('"' + title + '"')} ${yellow("idle")}${tabBadge}
       ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
       ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
   }

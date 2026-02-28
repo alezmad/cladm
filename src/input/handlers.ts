@@ -225,19 +225,25 @@ function handlePickerTabBarClick(col: number, screenRow: number) {
   c = 11
 
   for (const tab of app.gridTabs) {
-    const count = app.directGrid?.getTabPaneCount(tab.id) ?? 0
     const isActive = app.viewMode === "grid" && app.directGrid?.activeTabId === tab.id
-    const label = `${tab.name} (${count})`
-    const visLen = 2 + label.length // "● " + label
+
+    // Build inline pane name list to calculate width
+    const tabPanes = app.directGrid?.getTabPanes(tab.id) ?? []
+    const paneNames = tabPanes.map(p => {
+      const name = p.session.projectName
+      return name.length > 14 ? name.slice(0, 12) + "…" : name
+    })
+    const inlineLabel = paneNames.length > 0 ? paneNames.join(" · ") : "empty"
+    const visLen = 2 + inlineLabel.length // "● " + label
 
     const dg = app.directGrid
 
     if (isActive) {
-      // Active: ╭ ● label × ╮  →  c+1=╭, c+2=space, c+3..=● label, then close, ╮
+      // Active: ╭ ● panes × ╮
       const labelStart = c + 2
       const labelEnd = labelStart + visLen - 1
-      const closeCol = labelEnd + 2 // space + × position
-      const totalVis = 1 + 1 + visLen + 1 + 1 + 1 + 1 // ╭ + sp + label + sp + × + sp + ╮
+      const closeCol = labelEnd + 2
+      const totalVis = 1 + 1 + visLen + 1 + 1 + 1 + 1
 
       if (col === closeCol && dg) {
         const result = dg.requestCloseTab(tab.id)
@@ -251,11 +257,11 @@ function handlePickerTabBarClick(col: number, screenRow: number) {
       }
       c += totalVis
     } else {
-      // Inactive: sp ● label sp × sp │ → 1 + visLen + 1 + 1 + 1 + 1
+      // Inactive: sp ● panes sp × sp │
       const labelStart = c + 1
       const labelEnd = labelStart + visLen - 1
       const closeCol = labelEnd + 2
-      const totalVis = 1 + visLen + 1 + 1 + 1 + 1 // sp + label + sp + × + sp + │
+      const totalVis = 1 + visLen + 1 + 1 + 1 + 1
 
       if (col === closeCol && dg) {
         const result = dg.requestCloseTab(tab.id)

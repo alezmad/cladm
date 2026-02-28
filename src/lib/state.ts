@@ -49,6 +49,7 @@ export const app = {
   lastGridTabIndex: 0,             // last active grid tab for Ctrl+Space toggle
   savedSession: null as SavedSession | null,
   restoreMode: null as "pending" | null,
+  addPaneTargetTabId: null as number | null,
 
   // UI refs (set during init)
   renderer: null as unknown as CliRenderer,

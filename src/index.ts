@@ -72,7 +72,7 @@ async function main() {
       try {
         const state = extractSessionState()
         if (state) saveSessionSync(state)
-      } catch {}
+      } catch (err) { console.error("[session-save]", err) }
       if (app.monitorInterval) { clearInterval(app.monitorInterval); app.monitorInterval = null }
       if (app.directGrid) app.directGrid.destroyAll()
       stopAllCaptures()
@@ -187,7 +187,7 @@ async function main() {
   getUsageSummary().then(u => {
     app.cachedUsage = u
     updateUsagePanel()
-  }).catch(() => {})
+  }).catch(err => console.error("[usage]", err))
 
   // Resize PTY panes when terminal window is resized
   process.stdout.on("resize", () => {
@@ -220,7 +220,7 @@ async function main() {
       try {
         app.cachedUsage = await getUsageSummary()
         updateUsagePanel()
-      } catch {}
+      } catch (err) { console.error("[usage-poll]", err) }
     }
 
     if (app.demoMode) {

@@ -125,21 +125,27 @@ export function updateTabBar() {
     parts.push(t`  ${dim("○ Picker")} `)
   }
 
-  // Grid tabs
+  // Grid tabs — inline pane names
   for (const tab of app.gridTabs) {
-    const count = app.directGrid?.getTabPaneCount(tab.id) ?? 0
     const hasIdle = app.directGrid?.hasIdleInTab(tab.id) ?? false
     const isActive = app.viewMode === "grid" && app.directGrid?.activeTabId === tab.id
     const isPending = app.directGrid?.pendingCloseTabId === tab.id
-    const label = `${tab.name} (${count})`
     const closeBtn = isPending ? t` ${red(bold("[●]"))}` : t` ${dim("[×]")}`
 
+    // Build inline pane name list
+    const tabPanes = app.directGrid?.getTabPanes(tab.id) ?? []
+    const paneNames = tabPanes.map(p => {
+      const name = p.session.projectName
+      return name.length > 14 ? name.slice(0, 12) + "…" : name
+    })
+    const inlineLabel = paneNames.length > 0 ? paneNames.join(" · ") : "empty"
+
     if (isActive) {
-      parts.push(dim("╭"), t` ${cyan("●")} ${bold(label)}`, closeBtn, t` ${dim("╮")}`)
+      parts.push(dim("╭"), t` ${cyan("●")} ${bold(inlineLabel)}`, closeBtn, t` ${dim("╮")}`)
     } else if (hasIdle) {
-      parts.push(t` ${yellow("◉")} ${label}`, closeBtn, " ", sep)
+      parts.push(t` ${yellow("◉")} ${dim(inlineLabel)}`, closeBtn, " ", sep)
     } else {
-      parts.push(t` ${dim("○ " + label)}`, closeBtn, " ", sep)
+      parts.push(t` ${dim("○ " + inlineLabel)}`, closeBtn, " ", sep)
     }
   }
 
@@ -151,11 +157,22 @@ export function updateTabBar() {
 
 export function updateHeader() {
   const total = app.selectedProjects.size + app.selectedSessions.size
+  const modeLabel = app.demoMode ? " [DEMO]" : ""
+
+  // Add-pane mode: show target tab context
+  if (app.addPaneTargetTabId !== null) {
+    const targetTab = app.gridTabs.find(t => t.id === app.addPaneTargetTabId)
+    const tabName = targetTab?.name ?? `Tab ${app.addPaneTargetTabId}`
+    app.headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${cyan(bold(`Adding to: ${tabName}`))} │ ${String(total)} selected   ${dim(
+      `sort: ${app.sortLabels[app.sortMode]} │ ${app.projects.length} projects`
+    )}`
+    return
+  }
+
   // Count distinct tab groups
   const tabGroups = new Set(app.selectedProjects.values())
   const tabNote = tabGroups.size > 1 ? ` → ${tabGroups.size} tabs` : ""
   const branchNote = app.selectedBranches.size > 0 ? ` (${app.selectedBranches.size} branch switch)` : ""
-  const modeLabel = app.demoMode ? " [DEMO]" : ""
   const activeCount = app.projects.reduce((sum, p) => sum + (p.activeSessions > 0 ? 1 : 0), 0)
   const busyCount = app.projects.reduce((sum, p) => sum + (p.busySessions > 0 ? 1 : 0), 0)
   const idleCount = activeCount - busyCount
@@ -190,6 +207,12 @@ export function updateFooter() {
     const ago = timeAgoShort(app.savedSession.savedAt)
     const paneCount = app.savedSession.tabs.reduce((sum, t) => sum + t.panes.length, 0)
     restoreHint = ` │ r restore (${paneCount}p, ${ago})`
+  }
+
+  // Add-pane mode: simplified footer
+  if (app.addPaneTargetTabId !== null) {
+    app.footerText.content = t`  ${dim("↑↓ nav │ space select │ → expand │ ← collapse │ enter add │ esc cancel")}`
+    return
   }
 
   if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0) {

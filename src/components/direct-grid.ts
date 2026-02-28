@@ -86,7 +86,7 @@ export class DirectGridRenderer {
   private tabBarHitRegions: { tabId: number, startCol: number, endCol: number }[] = []
   private tabCloseHitRegions: { tabId: number, startCol: number, endCol: number }[] = []
   private tabBarAddBtnCol = -1
-  // Pane list hit-test regions (row 2)
+  // Pane name hit-test regions (inline in tab bar, row 1)
   private paneListHitRegions: { tabId: number, paneIndex: number, startCol: number, endCol: number }[] = []
 
   // Pending close state
@@ -371,12 +371,18 @@ export class DirectGridRenderer {
   // Check if a click hit a button on the top border. Returns action + pane index.
   // Hit areas are widened beyond the visible dot characters to make clicking easier.
   checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab" | "panefocus" | "closetab" | "closepane", paneIndex: number, tabId?: number } | null {
-    // Tab bar check (row 1)
+    // Tab bar check (row 1) — includes inline pane names
     if (row === 1) {
       // Check close buttons first — widened ±1 around the × character
       for (const region of this.tabCloseHitRegions) {
         if (col >= region.startCol - 1 && col <= region.endCol + 1) {
           return { action: "closetab", paneIndex: -1, tabId: region.tabId }
+        }
+      }
+      // Pane names (inline in tabs) — check before tab regions since they're more specific
+      for (const region of this.paneListHitRegions) {
+        if (col >= region.startCol - 1 && col <= region.endCol + 1) {
+          return { action: "panefocus", paneIndex: region.paneIndex, tabId: region.tabId }
         }
       }
       for (const region of this.tabBarHitRegions) {
@@ -387,15 +393,6 @@ export class DirectGridRenderer {
       // [+] button — widened ±1
       if (this.tabBarAddBtnCol > 0 && col >= this.tabBarAddBtnCol - 1 && col <= this.tabBarAddBtnCol + 3) {
         return { action: "newtab", paneIndex: -1 }
-      }
-      return null
-    }
-    // Pane list check (row 2) — widened ±1 for easier clicks
-    if (row === 2) {
-      for (const region of this.paneListHitRegions) {
-        if (col >= region.startCol - 1 && col <= region.endCol + 1) {
-          return { action: "panefocus", paneIndex: region.paneIndex, tabId: region.tabId }
-        }
       }
       return null
     }
@@ -562,7 +559,7 @@ export class DirectGridRenderer {
     if (n === 0) return false
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
-    const chromeTop = 4
+    const chromeTop = 3
     const { cols } = this.calcGrid(n)
     const rows = Math.ceil(n / cols)
     const cellW = Math.floor(termW / cols)
@@ -594,7 +591,7 @@ export class DirectGridRenderer {
     if (n === 0) return -1
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
-    const chromeTop = 4
+    const chromeTop = 3
     const { cols } = this.calcGrid(n)
     const rows = Math.ceil(n / cols)
     const cellW = Math.floor(termW / cols)
@@ -614,13 +611,10 @@ export class DirectGridRenderer {
 
     let out = SYNC_START
 
-    // Tab bar (row 1)
+    // Tab bar (row 1) — includes inline pane names
     out += this.drawTabBar(termW)
 
-    // Pane list (row 2)
-    out += this.drawPaneList(termW)
-
-    // Header (row 3)
+    // Header (row 2)
     const n = this.panes.length
     const fi = this._focusIndex + 1
     let headerLeft: string, headerRight: string
@@ -637,7 +631,7 @@ export class DirectGridRenderer {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${n} sessions │ focus: ${fi}/${n}`
       headerRight = `${DIM}shift+arrows nav │ ${hexFg("#f7768e")}[●]${RESET}${DIM} close ${hexFg("#9ece6a")}[●]${RESET}${DIM} expand │ ctrl+s select │ ctrl+space picker${RESET}`
     }
-    out += `\x1b[3;1H\x1b[${termW}X${headerLeft}   ${headerRight}`
+    out += `\x1b[2;1H\x1b[${termW}X${headerLeft}   ${headerRight}`
 
     // Pane borders + titles
     if (this.isExpanded) {
@@ -671,6 +665,7 @@ export class DirectGridRenderer {
   private drawTabBar(termW: number): string {
     this.tabBarHitRegions = []
     this.tabCloseHitRegions = []
+    this.paneListHitRegions = []
     this.tabBarAddBtnCol = -1
 
     const RED_FG = hexFg("#f7768e")
@@ -688,49 +683,106 @@ export class DirectGridRenderer {
       out += ` ${DIM}○ Picker${RESET} `
     }
     const pickerStart = pickerActive ? col + 1 : col + 1
-    const pickerVisLen = pickerActive ? 10 : 10
     this.tabBarHitRegions.push({ tabId: -1, startCol: pickerStart, endCol: pickerStart + 7 })
-    col += pickerVisLen
+    col += 10
 
-    // Grid tabs
+    // Grid tabs — inline pane names instead of tab names
     for (const tab of app.gridTabs) {
       const isActive = this._activeTabId === tab.id && app.viewMode === "grid"
-      const hasIdle = this.hasIdleInTab(tab.id)
-      const count = this.getTabPaneCount(tab.id)
-      const label = `${tab.name} (${count})`
       const isPending = this._pendingCloseTabId === tab.id
+      const tabPanes = this.tabPanes.get(tab.id) ?? []
 
-      const startCol = col + (isActive ? 2 : 1) // account for ╭ + space or just space
-      const visLen = 2 + label.length // "● " + label
+      // Build pane name list for this tab
+      const paneLabels: { name: string, color: string, status: PaneStatus, isFocused: boolean }[] = []
+      for (let pi = 0; pi < tabPanes.length; pi++) {
+        const p = tabPanes[pi]!
+        const name = p.session.projectName
+        const short = name.length > 14 ? name.slice(0, 12) + "…" : name
+        paneLabels.push({
+          name: short,
+          color: getColor(p.session.colorIndex),
+          status: p.status,
+          isFocused: isActive && this._focusIndex === pi,
+        })
+      }
 
-      // Close button text — framed for visibility
+      // Close button text
       const closeText = isPending ? `${RED_FG}${BOLD}[●]${RESET}` : `${DIM}[×]${RESET}`
       const closeVisLen = 3
 
+      const tabStartCol = col
+
       if (isActive) {
-        // Chrome-style raised active tab
-        out += `${TAB_BORDER}╭${RESET}${TAB_BG_ACTIVE} ${CYAN_FG}${BOLD}● ${label}${RESET}${TAB_BG_ACTIVE} ${closeText}${TAB_BG_ACTIVE} ${RESET}${TAB_BORDER}╮${RESET}`
-        // ╭ + space + ● label + space + × + space + ╮
-        const totalVis = 1 + 1 + visLen + 1 + closeVisLen + 1 + 1
-        this.tabBarHitRegions.push({ tabId: tab.id, startCol, endCol: startCol + visLen - 1 })
-        const closeStartCol = startCol + visLen + 1
-        this.tabCloseHitRegions.push({ tabId: tab.id, startCol: closeStartCol, endCol: closeStartCol + closeVisLen - 1 })
-        col += totalVis
-      } else {
-        // Inactive tab — flat, no border
-        let indicator: string
-        if (hasIdle) {
-          indicator = `${YELLOW_FG}◉ ${label}${RESET}`
-        } else {
-          indicator = `${DIM}○ ${label}${RESET}`
+        // Active tab: ╭ ● pane1 · ◉ pane2  × ╮
+        out += `${TAB_BORDER}╭${RESET}${TAB_BG_ACTIVE} `
+        col += 2 // ╭ + space
+
+        for (let pi = 0; pi < paneLabels.length; pi++) {
+          const pl = paneLabels[pi]!
+          let icon: string
+          if (pl.status === "busy") icon = `${hexFg("#9ece6a")}●${RESET}`
+          else if (pl.status === "idle") icon = `${hexFg("#e0af68")}◉${RESET}`
+          else icon = `${DIM}○${RESET}`
+
+          const paneStartCol = col
+          if (pl.isFocused) {
+            out += `${TAB_BG_ACTIVE}${icon} ${hexFg(pl.color)}${BOLD}${pl.name}${RESET}`
+          } else {
+            out += `${TAB_BG_ACTIVE}${icon} ${DIM}${pl.name}${RESET}`
+          }
+          col += 2 + pl.name.length // icon + space + name
+          this.paneListHitRegions.push({ tabId: tab.id, paneIndex: pi, startCol: paneStartCol, endCol: col - 1 })
+
+          if (pi < paneLabels.length - 1) {
+            out += `${TAB_BG_ACTIVE}${DIM} · ${RESET}`
+            col += 3
+          }
         }
-        out += ` ${indicator} ${closeText} ${DIM}│${RESET}`
-        // space + ● label + space + × + space + │
-        const totalVis = 1 + visLen + 1 + closeVisLen + 1 + 1
-        this.tabBarHitRegions.push({ tabId: tab.id, startCol, endCol: startCol + visLen - 1 })
-        const closeStartCol = startCol + visLen + 1
+
+        if (paneLabels.length === 0) {
+          out += `${TAB_BG_ACTIVE}${DIM}empty${RESET}`
+          col += 5
+        }
+
+        out += `${TAB_BG_ACTIVE} ${closeText}${TAB_BG_ACTIVE} ${RESET}${TAB_BORDER}╮${RESET}`
+        const closeStartCol = col + 1
+        col += 1 + closeVisLen + 1 + 1 // space + [×] + space + ╮
         this.tabCloseHitRegions.push({ tabId: tab.id, startCol: closeStartCol, endCol: closeStartCol + closeVisLen - 1 })
-        col += totalVis
+        this.tabBarHitRegions.push({ tabId: tab.id, startCol: tabStartCol, endCol: col - 1 })
+      } else {
+        // Inactive tab: ○ pane1 · pane2  × │
+        const hasIdle = this.hasIdleInTab(tab.id)
+        out += ` `
+        col += 1
+
+        for (let pi = 0; pi < paneLabels.length; pi++) {
+          const pl = paneLabels[pi]!
+          let icon: string
+          if (pl.status === "idle") icon = `${YELLOW_FG}◉${RESET}`
+          else if (pl.status === "busy") icon = `${DIM}●${RESET}`
+          else icon = `${DIM}○${RESET}`
+
+          const paneStartCol = col
+          out += `${icon} ${DIM}${pl.name}${RESET}`
+          col += 2 + pl.name.length
+          this.paneListHitRegions.push({ tabId: tab.id, paneIndex: pi, startCol: paneStartCol, endCol: col - 1 })
+
+          if (pi < paneLabels.length - 1) {
+            out += `${DIM} · ${RESET}`
+            col += 3
+          }
+        }
+
+        if (paneLabels.length === 0) {
+          out += `${DIM}empty${RESET}`
+          col += 5
+        }
+
+        out += ` ${closeText} ${DIM}│${RESET}`
+        const closeStartCol = col + 1
+        col += 1 + closeVisLen + 1 + 1 // space + [×] + space + │
+        this.tabCloseHitRegions.push({ tabId: tab.id, startCol: closeStartCol, endCol: closeStartCol + closeVisLen - 1 })
+        this.tabBarHitRegions.push({ tabId: tab.id, startCol: tabStartCol, endCol: col - 1 })
       }
     }
 
@@ -743,50 +795,7 @@ export class DirectGridRenderer {
     return out
   }
 
-  private drawPaneList(termW: number): string {
-    this.paneListHitRegions = []
-    let out = `\x1b[2;1H\x1b[${termW}X  `
-    let col = 3
 
-    // Show panes across all tabs, grouped by tab
-    for (const tab of app.gridTabs) {
-      const tabPanes = this.tabPanes.get(tab.id) ?? []
-      if (tabPanes.length === 0) continue
-
-      for (let pi = 0; pi < tabPanes.length; pi++) {
-        const pane = tabPanes[pi]!
-        const isFocused = this._activeTabId === tab.id && this._focusIndex === pi
-        const name = pane.session.projectName
-        const short = name.length > 14 ? name.slice(0, 12) + "…" : name
-        const color = getColor(pane.session.colorIndex)
-
-        // Status icon: ● green=running, ◉ yellow=idle, ○ dim=unknown
-        let statusIcon: string
-        if (pane.status === "busy") statusIcon = `${hexFg("#9ece6a")}● ${RESET}`
-        else if (pane.status === "idle") statusIcon = `${hexFg("#e0af68")}◉ ${RESET}`
-        else statusIcon = `${DIM}○ ${RESET}`
-
-        const startCol = col
-        if (isFocused) {
-          out += `${statusIcon}${hexFg(color)}${BOLD}${short}${RESET}`
-        } else {
-          out += `${statusIcon}${DIM}${short}${RESET}`
-        }
-        col += 2 + short.length // icon + space + name
-        this.paneListHitRegions.push({ tabId: tab.id, paneIndex: pi, startCol, endCol: col - 1 })
-
-        if (pi < tabPanes.length - 1) {
-          out += `${DIM} · ${RESET}`
-          col += 3
-        }
-      }
-
-      out += `${DIM}  │  ${RESET}`
-      col += 5
-    }
-
-    return out
-  }
 
   private drawPaneBorder(index: number): string {
     const pane = this.panes[index]!
@@ -973,7 +982,7 @@ export class DirectGridRenderer {
     const n = count ?? this.panes.length
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
-    const chromeTop = 4 // row 1 = tab bar, row 2 = pane list, row 3 = header, content starts row 4
+    const chromeTop = 3 // row 1 = tab bar (with inline panes), row 2 = header, content starts row 3
     const { cols, rows } = this.calcGrid(n)
     const cellW = Math.floor(termW / cols)
     const cellH = Math.floor((termH - chromeTop - 1) / rows) // -1 for footer
@@ -999,7 +1008,7 @@ export class DirectGridRenderer {
   repositionAll() {
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
-    const chromeTop = 4
+    const chromeTop = 3
 
     if (this.isExpanded) {
       // Fullscreen: expanded pane gets all space
