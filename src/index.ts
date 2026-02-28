@@ -10,6 +10,7 @@ import { loadGitMetadata } from "./data/git"
 import { loadSessions } from "./data/sessions"
 import { generateMockProjects, generateMockSessions, generateMockBusySessions } from "./data/mock"
 import { detectActiveSessions, updateProjectSessions, generateMockActiveSessions, checkTransitions, snapshotBusy, playDoneSound, bounceDock, getSessionStatus, populateMockSessionStatus } from "./data/monitor"
+import type { Project } from "./lib/types"
 import { getUsageSummary } from "./data/usage"
 import { getSessions, refreshAlive } from "./pty/session-manager"
 import { stopAllCaptures } from "./pty/capture"
@@ -18,6 +19,18 @@ import { app } from "./lib/state"
 import { updateAll, rebuildDisplayRows, updateUsagePanel, updateColumnHeaders } from "./ui/panels"
 import { stdinHandler } from "./input/handlers"
 import { resizeGridPanes } from "./grid/view-switch"
+
+function refreshMockSessions(projects: Project[]) {
+  generateMockActiveSessions(projects)
+  generateMockBusySessions(projects)
+  for (const p of projects) {
+    if (p.activeSessions > 0 && !p.sessions) {
+      p.sessions = generateMockSessions(p.path)
+      p.sessionCount = p.sessions.length
+    }
+    populateMockSessionStatus(p)
+  }
+}
 
 async function main() {
   process.stdout.write("\x1b[2J\x1b[H")
@@ -165,15 +178,7 @@ async function main() {
 
   // Live session monitoring
   if (app.demoMode) {
-    generateMockActiveSessions(app.projects)
-    generateMockBusySessions(app.projects)
-    for (const p of app.projects) {
-      if (p.activeSessions > 0 && !p.sessions) {
-        p.sessions = generateMockSessions(p.path)
-        p.sessionCount = p.sessions.length
-      }
-      populateMockSessionStatus(p)
-    }
+    refreshMockSessions(app.projects)
     app.prevBusySnapshot = snapshotBusy(app.projects)
     updateAll()
   } else {
@@ -197,15 +202,7 @@ async function main() {
 
     if (app.demoMode) {
       for (const p of app.projects) { p.activeSessions = 0; p.busySessions = 0 }
-      generateMockActiveSessions(app.projects)
-      generateMockBusySessions(app.projects)
-      for (const p of app.projects) {
-        if (p.activeSessions > 0 && !p.sessions) {
-          p.sessions = generateMockSessions(p.path)
-          p.sessionCount = p.sessions.length
-        }
-        populateMockSessionStatus(p)
-      }
+      refreshMockSessions(app.projects)
       const transitioned = checkTransitions(app.projects, app.prevBusySnapshot)
       app.prevBusySnapshot = snapshotBusy(app.projects)
       if (transitioned.length > 0) {

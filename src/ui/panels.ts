@@ -11,11 +11,13 @@ import {
   magenta,
 } from "@opentui/core"
 import { app } from "../lib/state"
-import { CURSOR_BG, ACTIVE_BG, ACCENT, DIM_CLR } from "../lib/theme"
+import { CURSOR_BG, ACTIVE_BG, ACCENT } from "../lib/theme"
 import { getSessionStatus, getIdleSessions } from "../data/monitor"
-import { getUsageSummary, formatCost, formatWindow, makeBar, pct, PLAN_LIMITS } from "../data/usage"
+import { formatCost, formatWindow, makeBar, pct, PLAN_LIMITS } from "../data/usage"
 import { timeAgo, formatSize, elapsedCompact } from "../lib/time"
 import { fmtProjectRow, fmtSessionRow, fmtNewSessionRow, fmtBranchRow, fmtSyncIndicator } from "./formatters"
+
+// ─── Display rows ────────────────────────────────────────────────────
 
 export function rebuildDisplayRows() {
   app.displayRows = []
@@ -65,6 +67,8 @@ export function applySortMode() {
   rebuildDisplayRows()
 }
 
+// ─── Header / Footer ─────────────────────────────────────────────────
+
 export function updateHeader() {
   const total = app.selectedProjects.size + app.selectedSessions.size
   const branchNote = app.selectedBranches.size > 0 ? ` (${app.selectedBranches.size} branch switch)` : ""
@@ -88,6 +92,20 @@ export function updateColumnHeaders() {
   app.colHeaderText.content = t`  ${dim(cols)}`
 }
 
+export function updateFooter() {
+  if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0) {
+    app.footerText.content = t`  ${dim(
+      "↑↓ nav │ tab/shift-tab idle select │ enter focus │ i preview │ space select │ a all │ n none │ s sort │ q quit"
+    )}`
+  } else {
+    app.footerText.content = t`  ${dim(
+      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter grid │ o external │ q quit"
+    )}`
+  }
+}
+
+// ─── Bottom panel ────────────────────────────────────────────────────
+
 function addIdleRow(s: { idleSinceMs: number; projectName: string; sessionTitle: string; lastPrompt: string; lastResponse: string }, isCursor: boolean) {
   const elapsed = (elapsedCompact(s.idleSinceMs) || "<5s").padEnd(6)
   const name = s.projectName.length > 20 ? s.projectName.slice(0, 17) + "..." : s.projectName
@@ -104,11 +122,11 @@ function addIdleRow(s: { idleSinceMs: number; projectName: string; sessionTitle:
   app.previewBox.add(Text({ content: t`       ${dim("│")}  ${dim("Claude:")} ${fg(ACCENT)('"' + response + '"')}`, width: "100%", height: 1 }))
 }
 
-export function updateIdlePanel() {
+function updateIdlePanel() {
   app.cachedIdleSessions = getIdleSessions(app.projects)
   const n = app.cachedIdleSessions.length
   app.previewBox.title = ` Idle Sessions (${n}) — enter to focus `
-  for (const child of app.previewBox.getChildren()) app.previewBox.remove(child.id)
+  clearChildren(app.previewBox)
   if (n === 0) {
     app.idleCursor = 0
     app.previewBox.add(Text({ content: t`${dim("  No idle sessions")}`, width: "100%", height: 1 }))
@@ -129,7 +147,7 @@ export function updateBottomPanel() {
     app.bottomRow.height = 14
     updateIdlePanel()
   } else {
-    for (const child of app.previewBox.getChildren()) app.previewBox.remove(child.id)
+    clearChildren(app.previewBox)
     app.previewBox.add(app.previewText)
     app.bottomRow.height = 10
     app.previewBox.title = " Preview "
@@ -137,13 +155,15 @@ export function updateBottomPanel() {
   }
 }
 
+// ─── Usage panel ─────────────────────────────────────────────────────
+
 function usageBarColor(p: number) {
   return p >= 80 ? yellow : p >= 50 ? cyan : green
 }
 
 export function updateUsagePanel() {
   if (app.destroyed) return
-  for (const child of app.usageBox.getChildren()) app.usageBox.remove(child.id)
+  clearChildren(app.usageBox)
 
   if (!app.cachedUsage) {
     app.usageBox.title = " Usage "
@@ -179,17 +199,7 @@ export function updateUsagePanel() {
   app.renderer.requestRender()
 }
 
-export function updateFooter() {
-  if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0) {
-    app.footerText.content = t`  ${dim(
-      "↑↓ nav │ tab/shift-tab idle select │ enter focus │ i preview │ space select │ a all │ n none │ s sort │ q quit"
-    )}`
-  } else {
-    app.footerText.content = t`  ${dim(
-      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter grid │ o external │ q quit"
-    )}`
-  }
-}
+// ─── Preview panel ───────────────────────────────────────────────────
 
 export function updatePreview() {
   if (app.cursor >= app.displayRows.length) {
@@ -236,53 +246,47 @@ ${selNote}`
   }
 }
 
-export function rebuildList() {
-  for (const child of app.listBox.getChildren()) {
-    app.listBox.remove(child.id)
+// ─── List rendering ──────────────────────────────────────────────────
+
+// Renderable IDs for each row — enables incremental updates
+let rowRenderableIds: string[] = []
+
+function renderRowContent(i: number) {
+  const row = app.displayRows[i]
+  const project = app.projects[row.projectIndex]
+
+  let content: ReturnType<typeof t>
+  let rowHeight = 1
+  if (row.type === "project") {
+    content = fmtProjectRow(project, app.selectedProjects.has(project.path))
+  } else if (row.type === "session") {
+    content = fmtSessionRow(row.projectIndex, row.sessionIndex!, app.selectedSessions.has(project.sessions![row.sessionIndex!].id), false)
+    rowHeight = 3
+  } else if (row.type === "branch") {
+    content = fmtBranchRow(row.projectIndex, row.branchName!, app.selectedBranches.get(project.path) === row.branchName)
+  } else {
+    content = fmtNewSessionRow(row.projectIndex, app.selectedProjects.has(project.path))
   }
 
+  const isCursor = i === app.cursor
+  const isActiveProject = row.type === "project" && project.activeSessions > 0
+  const isActiveSession = row.type === "session" && getSessionStatus(project.path, project.sessions![row.sessionIndex!].id) !== null
+  const bgColor = isCursor ? CURSOR_BG : (isActiveProject || isActiveSession) ? ACTIVE_BG : undefined
+
+  if (bgColor) {
+    return Box({ backgroundColor: bgColor, shouldFill: true, width: "100%", height: rowHeight }, Text({ content }))
+  }
+  return Text({ content, width: "100%", height: rowHeight })
+}
+
+export function rebuildList() {
+  clearChildren(app.listBox)
+  rowRenderableIds = []
+
   for (let i = 0; i < app.displayRows.length; i++) {
-    const row = app.displayRows[i]
-    const isCursor = i === app.cursor
-    const project = app.projects[row.projectIndex]
-
-    let content: ReturnType<typeof t>
-    let rowHeight = 1
-    if (row.type === "project") {
-      const isSel = app.selectedProjects.has(project.path)
-      content = fmtProjectRow(project, isSel)
-    } else if (row.type === "session") {
-      const session = project.sessions![row.sessionIndex!]
-      const isSel = app.selectedSessions.has(session.id)
-      content = fmtSessionRow(row.projectIndex, row.sessionIndex!, isSel, false)
-      rowHeight = 3
-    } else if (row.type === "branch") {
-      const isSel = app.selectedBranches.get(project.path) === row.branchName
-      content = fmtBranchRow(row.projectIndex, row.branchName!, isSel)
-    } else {
-      const isSel = app.selectedProjects.has(project.path)
-      content = fmtNewSessionRow(row.projectIndex, isSel)
-    }
-
-    const isActiveProject = row.type === "project" && project.activeSessions > 0
-    const isActiveSession = row.type === "session" && getSessionStatus(project.path, project.sessions![row.sessionIndex!].id) !== null
-    const bgColor = isCursor ? CURSOR_BG : (isActiveProject || isActiveSession) ? ACTIVE_BG : undefined
-
-    if (bgColor) {
-      app.listBox.add(
-        Box(
-          {
-            backgroundColor: bgColor,
-            shouldFill: true,
-            width: "100%",
-            height: rowHeight,
-          },
-          Text({ content })
-        )
-      )
-    } else {
-      app.listBox.add(Text({ content, width: "100%", height: rowHeight }))
-    }
+    const vnode = renderRowContent(i)
+    const rid = app.listBox.add(vnode)
+    rowRenderableIds.push(rid as unknown as string)
   }
 
   ensureCursorVisible()
@@ -311,6 +315,14 @@ export function ensureCursorVisible() {
     app.listBox.scrollTo(cursorY + cursorH - vpH)
   }
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────────
+
+function clearChildren(box: { getChildren(): { id: string }[]; remove(id: string): void }) {
+  for (const child of box.getChildren()) box.remove(child.id)
+}
+
+// ─── Top-level ───────────────────────────────────────────────────────
 
 export function updateAll() {
   if (app.destroyed) return

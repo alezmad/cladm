@@ -8,10 +8,12 @@ import { launchSelections } from "../actions/launcher"
 import { loadSessions } from "../data/sessions"
 import { loadBranches } from "../data/git"
 import { generateMockSessions, generateMockBranches } from "../data/mock"
-import { focusTerminalByPath, getSessionStatus, populateMockSessionStatus } from "../data/monitor"
+import { focusTerminalByPath, populateMockSessionStatus } from "../data/monitor"
 import { stopAllCaptures } from "../pty/capture"
+import type { DisplayRow } from "../lib/types"
 
-// Shift+arrow sequences across terminal emulators
+// ─── Constants ───────────────────────────────────────────────────────
+
 const SHIFT_ARROWS: Record<string, "up" | "down" | "left" | "right"> = {
   "\x1b[1;2A": "up",
   "\x1b[1;2B": "down",
@@ -22,6 +24,70 @@ const SHIFT_ARROWS: Record<string, "up" | "down" | "left" | "right"> = {
   "\x1b[c": "right",
   "\x1b[d": "left",
 }
+
+const KEY_MAP: Record<string, { name: string; shift?: boolean; ctrl?: boolean }> = {
+  "\x1b[A": { name: "up" },
+  "\x1b[B": { name: "down" },
+  "\x1b[C": { name: "right" },
+  "\x1b[D": { name: "left" },
+  "\x1b[5~": { name: "pageup" },
+  "\x1b[6~": { name: "pagedown" },
+  "\x1b[H": { name: "home" },
+  "\x1b[F": { name: "end" },
+  "\x1bOH": { name: "home" },
+  "\x1bOF": { name: "end" },
+  "\x1b[Z": { name: "tab", shift: true },
+  "\x1b[1;2A": { name: "up", shift: true },
+  "\x1b[1;2B": { name: "down", shift: true },
+  "\x1b[1;2C": { name: "right", shift: true },
+  "\x1b[1;2D": { name: "left", shift: true },
+  "\x09": { name: "tab" },
+  "\x0d": { name: "return" },
+  "\x1b": { name: "escape" },
+  " ": { name: "space" },
+}
+
+const NOOP = () => {}
+
+// ─── Selection helpers ───────────────────────────────────────────────
+
+function toggleSetItem<T>(set: Set<T>, item: T) {
+  if (set.has(item)) set.delete(item)
+  else set.add(item)
+}
+
+function toggleRowSelection(row: DisplayRow) {
+  const project = app.projects[row.projectIndex]
+  if (row.type === "project" || row.type === "new-session") {
+    toggleSetItem(app.selectedProjects, project.path)
+  } else if (row.type === "session") {
+    toggleSetItem(app.selectedSessions, project.sessions![row.sessionIndex!].id)
+  } else if (row.type === "branch") {
+    if (app.selectedBranches.get(project.path) === row.branchName) {
+      app.selectedBranches.delete(project.path)
+    } else {
+      app.selectedBranches.set(project.path, row.branchName!)
+    }
+  }
+}
+
+function syntheticKey(name: string, shift = false, ctrl = false): KeyEvent {
+  return { name, shift, ctrl, meta: false, preventDefault: NOOP, stopPropagation: NOOP } as KeyEvent
+}
+
+// ─── Collapse helper ─────────────────────────────────────────────────
+
+function collapseProject(projectIndex: number) {
+  app.projects[projectIndex].expanded = false
+  rebuildDisplayRows()
+  const target = app.displayRows.findIndex(
+    (r) => r.type === "project" && r.projectIndex === projectIndex
+  )
+  app.cursor = target >= 0 ? target : 0
+  if (app.cursor >= app.displayRows.length) app.cursor = app.displayRows.length - 1
+}
+
+// ─── Expand ──────────────────────────────────────────────────────────
 
 export async function expandProject(projectIndex: number) {
   const project = app.projects[projectIndex]
@@ -56,11 +122,11 @@ export async function expandProject(projectIndex: number) {
   updateAll()
 }
 
-export function hitTestListRow(screenRow: number): number {
-  const listStartY = 2
-  const relY = screenRow - listStartY + app.listBox.scrollTop
-  if (relY < 0) return -1
+// ─── Hit test ────────────────────────────────────────────────────────
 
+export function hitTestListRow(screenRow: number): number {
+  const relY = screenRow - 2 + app.listBox.scrollTop
+  if (relY < 0) return -1
   let y = 0
   for (let i = 0; i < app.displayRows.length; i++) {
     const h = app.displayRows[i].type === "session" ? 3 : 1
@@ -70,33 +136,17 @@ export function hitTestListRow(screenRow: number): number {
   return -1
 }
 
+// ─── Picker click ────────────────────────────────────────────────────
+
 export function handlePickerClick(_col: number, screenRow: number) {
   const idx = hitTestListRow(screenRow)
   if (idx < 0 || idx >= app.displayRows.length) return
-
   app.cursor = idx
-  const row = app.displayRows[idx]
-  const project = app.projects[row.projectIndex]
-
-  if (row.type === "project" || row.type === "new-session") {
-    const path = project.path
-    if (app.selectedProjects.has(path)) app.selectedProjects.delete(path)
-    else app.selectedProjects.add(path)
-  } else if (row.type === "session") {
-    const session = project.sessions![row.sessionIndex!]
-    if (app.selectedSessions.has(session.id)) app.selectedSessions.delete(session.id)
-    else app.selectedSessions.add(session.id)
-  } else if (row.type === "branch") {
-    const path = project.path
-    if (app.selectedBranches.get(path) === row.branchName) {
-      app.selectedBranches.delete(path)
-    } else {
-      app.selectedBranches.set(path, row.branchName!)
-    }
-  }
-
+  toggleRowSelection(app.displayRows[idx])
   updateAll()
 }
+
+// ─── Keyboard ────────────────────────────────────────────────────────
 
 export async function handleKeypress(key: KeyEvent) {
   try {
@@ -130,58 +180,23 @@ export async function handleKeypress(key: KeyEvent) {
 
     case "right": {
       const row = app.displayRows[app.cursor]
-      if (row.type === "project") {
-        const project = app.projects[row.projectIndex]
-        if (!project.expanded) {
-          expandProject(row.projectIndex)
-          return
-        }
+      if (row.type === "project" && !app.projects[row.projectIndex].expanded) {
+        expandProject(row.projectIndex)
+        return
       }
       return
     }
 
-    case "left": {
-      const row = app.displayRows[app.cursor]
-      if (row.type === "project") {
-        app.projects[row.projectIndex].expanded = false
-      } else {
-        app.projects[row.projectIndex].expanded = false
-        const target = row.projectIndex
-        rebuildDisplayRows()
-        app.cursor = app.displayRows.findIndex(
-          (r) => r.type === "project" && r.projectIndex === target
-        )
-        if (app.cursor < 0) app.cursor = 0
-      }
-      rebuildDisplayRows()
-      if (app.cursor >= app.displayRows.length) app.cursor = app.displayRows.length - 1
+    case "left":
+      collapseProject(app.displayRows[app.cursor].projectIndex)
       break
-    }
 
-    case "space": {
-      const row = app.displayRows[app.cursor]
-      if (row.type === "project" || row.type === "new-session") {
-        const path = app.projects[row.projectIndex].path
-        if (app.selectedProjects.has(path)) app.selectedProjects.delete(path)
-        else app.selectedProjects.add(path)
-      } else if (row.type === "session") {
-        const session = app.projects[row.projectIndex].sessions![row.sessionIndex!]
-        if (app.selectedSessions.has(session.id)) app.selectedSessions.delete(session.id)
-        else app.selectedSessions.add(session.id)
-      } else if (row.type === "branch") {
-        const path = app.projects[row.projectIndex].path
-        if (app.selectedBranches.get(path) === row.branchName) {
-          app.selectedBranches.delete(path)
-        } else {
-          app.selectedBranches.set(path, row.branchName!)
-        }
-      }
+    case "space":
+      toggleRowSelection(app.displayRows[app.cursor])
       break
-    }
 
     case "f": {
-      const row = app.displayRows[app.cursor]
-      const project = app.projects[row.projectIndex]
+      const project = app.projects[app.displayRows[app.cursor].projectIndex]
       Bun.spawn(["open", project.path])
       break
     }
@@ -215,11 +230,10 @@ export async function handleKeypress(key: KeyEvent) {
 
     case "tab":
       if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0) {
-        if (key.shift) {
-          app.idleCursor = app.idleCursor > 0 ? app.idleCursor - 1 : Math.min(app.cachedIdleSessions.length, 3) - 1
-        } else {
-          app.idleCursor = (app.idleCursor + 1) % Math.min(app.cachedIdleSessions.length, 3)
-        }
+        const max = Math.min(app.cachedIdleSessions.length, 3)
+        app.idleCursor = key.shift
+          ? (app.idleCursor > 0 ? app.idleCursor - 1 : max - 1)
+          : (app.idleCursor + 1) % max
       }
       break
 
@@ -236,24 +250,18 @@ export async function handleKeypress(key: KeyEvent) {
         break
       }
       if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0 && app.idleCursor < app.cachedIdleSessions.length) {
-        const focused = await focusTerminalByPath(app.cachedIdleSessions[app.idleCursor].projectPath)
-        if (focused) return
+        if (await focusTerminalByPath(app.cachedIdleSessions[app.idleCursor].projectPath)) return
       }
       const returnRow = app.displayRows[app.cursor]
-      if (
-        returnRow.type === "project" &&
-        app.projects[returnRow.projectIndex].activeSessions > 0
-      ) {
-        const focused = await focusTerminalByPath(app.projects[returnRow.projectIndex].path)
-        if (focused) return
+      if (returnRow.type === "project" && app.projects[returnRow.projectIndex].activeSessions > 0) {
+        if (await focusTerminalByPath(app.projects[returnRow.projectIndex].path)) return
       }
       doLaunch()
       break
     }
 
     case "o": {
-      const hasOSel = app.selectedProjects.size > 0 || app.selectedSessions.size > 0
-      if (!hasOSel) {
+      if (app.selectedProjects.size === 0 && app.selectedSessions.size === 0) {
         const oRow = app.displayRows[app.cursor]
         if (oRow) app.selectedProjects.add(app.projects[oRow.projectIndex].path)
       }
@@ -277,10 +285,7 @@ export async function handleKeypress(key: KeyEvent) {
       return
 
     case "t":
-      if (app.directGrid && app.directGrid.paneCount > 0) {
-        switchToGrid()
-        return
-      }
+      if (app.directGrid && app.directGrid.paneCount > 0) switchToGrid()
       return
 
     default:
@@ -290,6 +295,8 @@ export async function handleKeypress(key: KeyEvent) {
   updateAll()
   } catch {}
 }
+
+// ─── Grid input ──────────────────────────────────────────────────────
 
 export async function handleGridInput(rawSequence: string): Promise<boolean> {
   if (app.viewMode !== "grid" || !app.directGrid) return false
@@ -304,15 +311,8 @@ export async function handleGridInput(rawSequence: string): Promise<boolean> {
     return true
   }
 
-  if (rawSequence === "\x0e") {
-    app.directGrid.focusNext()
-    return true
-  }
-
-  if (rawSequence === "\x10") {
-    app.directGrid.focusPrev()
-    return true
-  }
+  if (rawSequence === "\x0e") { app.directGrid.focusNext(); return true }
+  if (rawSequence === "\x10") { app.directGrid.focusPrev(); return true }
 
   if (rawSequence === "\x06") {
     const pane = app.directGrid.focusedPane
@@ -327,25 +327,19 @@ export async function handleGridInput(rawSequence: string): Promise<boolean> {
       const { killSession } = await import("../pty/session-manager")
       app.directGrid.removePane(pane.session.name)
       await killSession(pane.session.name)
-      if (app.directGrid.paneCount === 0) {
-        switchToPicker()
-      }
+      if (app.directGrid.paneCount === 0) switchToPicker()
     }
     return true
   }
 
-  if (rawSequence === "\x1b[5~") {
-    app.directGrid.sendScrollToFocused("up")
-    return true
-  }
-  if (rawSequence === "\x1b[6~") {
-    app.directGrid.sendScrollToFocused("down")
-    return true
-  }
+  if (rawSequence === "\x1b[5~") { app.directGrid.sendScrollToFocused("up"); return true }
+  if (rawSequence === "\x1b[6~") { app.directGrid.sendScrollToFocused("down"); return true }
 
   app.directGrid.sendInputToFocused(rawSequence)
   return true
 }
+
+// ─── View switching ──────────────────────────────────────────────────
 
 export function switchToPicker() {
   app.viewMode = "picker"
@@ -363,62 +357,46 @@ export function switchToPicker() {
   app.renderer.requestRender()
 }
 
-export function stdinHandler(data: string | Buffer) {
-  const str = typeof data === "string" ? data : data.toString("utf8")
+// ─── Stdin: grid mode ────────────────────────────────────────────────
 
-  if (app.viewMode === "grid" && app.directGrid) {
-    if (app.directGrid.selectMode) {
-      const keyboard = extractKeyboardInput(str)
-      if (keyboard === "\x1b") {
-        app.directGrid.exitSelectMode()
-      }
-      return
-    }
+function processGridInput(str: string) {
+  const dg = app.directGrid!
 
-    const mouseEvents = extractMouseEvents(str)
-    for (const me of mouseEvents) {
-      if (me.btn === 64) {
-        app.directGrid.sendScrollToFocused("up", 3)
-        continue
-      }
-      if (me.btn === 65) {
-        app.directGrid.sendScrollToFocused("down", 3)
-        continue
-      }
-      if (me.btn === 0 && !me.release) {
-        const btn = app.directGrid.checkButtonClick(me.col, me.row)
-        if (btn?.action === "max") {
-          app.directGrid.expandPane(btn.paneIndex)
-        } else if (btn?.action === "min") {
-          app.directGrid.collapsePane()
-        } else if (btn?.action === "sel") {
-          app.directGrid.enterSelectMode()
-        } else {
-          app.directGrid.focusByClick(me.col, me.row)
-        }
-        continue
-      }
-    }
-
-    let stripped = str
-    for (let i = mouseEvents.length - 1; i >= 0; i--) {
-      const me = mouseEvents[i]
-      stripped = stripped.slice(0, me.start) + stripped.slice(me.end)
-    }
-
-    const keyboard = extractKeyboardInput(stripped)
-    if (keyboard) {
-      const dir = SHIFT_ARROWS[keyboard]
-      if (dir) {
-        app.directGrid.focusByDirection(dir)
-      } else {
-        handleGridInput(keyboard)
-      }
-    }
+  if (dg.selectMode) {
+    if (extractKeyboardInput(str) === "\x1b") dg.exitSelectMode()
     return
   }
 
-  // Picker mode
+  const mouseEvents = extractMouseEvents(str)
+  for (const me of mouseEvents) {
+    if (me.btn === 64) { dg.sendScrollToFocused("up", 3); continue }
+    if (me.btn === 65) { dg.sendScrollToFocused("down", 3); continue }
+    if (me.btn === 0 && !me.release) {
+      const btn = dg.checkButtonClick(me.col, me.row)
+      if (btn?.action === "max") dg.expandPane(btn.paneIndex)
+      else if (btn?.action === "min") dg.collapsePane()
+      else if (btn?.action === "sel") dg.enterSelectMode()
+      else dg.focusByClick(me.col, me.row)
+      continue
+    }
+  }
+
+  let stripped = str
+  for (let i = mouseEvents.length - 1; i >= 0; i--) {
+    const me = mouseEvents[i]
+    stripped = stripped.slice(0, me.start) + stripped.slice(me.end)
+  }
+
+  const keyboard = extractKeyboardInput(stripped)
+  if (!keyboard) return
+  const dir = SHIFT_ARROWS[keyboard]
+  if (dir) dg.focusByDirection(dir)
+  else handleGridInput(keyboard)
+}
+
+// ─── Stdin: picker mode ──────────────────────────────────────────────
+
+function processPickerInput(str: string) {
   const pickerMouse = extractMouseEvents(str)
   for (const me of pickerMouse) {
     if (me.btn === 0 && !me.release) handlePickerClick(me.col, me.row)
@@ -429,64 +407,32 @@ export function stdinHandler(data: string | Buffer) {
   const keyboard = extractKeyboardInput(str)
   if (!keyboard) return
 
-  const keyMap: Record<string, { name: string; shift?: boolean; ctrl?: boolean }> = {
-    "\x1b[A": { name: "up" },
-    "\x1b[B": { name: "down" },
-    "\x1b[C": { name: "right" },
-    "\x1b[D": { name: "left" },
-    "\x1b[5~": { name: "pageup" },
-    "\x1b[6~": { name: "pagedown" },
-    "\x1b[H": { name: "home" },
-    "\x1b[F": { name: "end" },
-    "\x1bOH": { name: "home" },
-    "\x1bOF": { name: "end" },
-    "\x1b[Z": { name: "tab", shift: true },
-    "\x1b[1;2A": { name: "up", shift: true },
-    "\x1b[1;2B": { name: "down", shift: true },
-    "\x1b[1;2C": { name: "right", shift: true },
-    "\x1b[1;2D": { name: "left", shift: true },
-    "\x09": { name: "tab" },
-    "\x0d": { name: "return" },
-    "\x1b": { name: "escape" },
-    " ": { name: "space" },
-  }
-
   let ki = 0
   while (ki < keyboard.length) {
     let matched = false
     for (let len = Math.min(8, keyboard.length - ki); len >= 1; len--) {
-      const seq = keyboard.slice(ki, ki + len)
-      const mapped = keyMap[seq]
+      const mapped = KEY_MAP[keyboard.slice(ki, ki + len)]
       if (mapped) {
-        const syntheticKey = {
-          name: mapped.name,
-          shift: mapped.shift || false,
-          ctrl: mapped.ctrl || false,
-          meta: false,
-          preventDefault: () => {},
-          stopPropagation: () => {},
-        } as KeyEvent
-        handleKeypress(syntheticKey)
+        handleKeypress(syntheticKey(mapped.name, mapped.shift, mapped.ctrl))
         ki += len
         matched = true
         break
       }
     }
     if (!matched) {
-      const ch = keyboard[ki]
-      const code = ch.charCodeAt(0)
+      const code = keyboard.charCodeAt(ki)
       if (code >= 0x21 && code <= 0x7e) {
-        const syntheticKey = {
-          name: ch,
-          shift: false,
-          ctrl: false,
-          meta: false,
-          preventDefault: () => {},
-          stopPropagation: () => {},
-        } as KeyEvent
-        handleKeypress(syntheticKey)
+        handleKeypress(syntheticKey(keyboard[ki]))
       }
       ki++
     }
   }
+}
+
+// ─── Stdin entry point ───────────────────────────────────────────────
+
+export function stdinHandler(data: string | Buffer) {
+  const str = typeof data === "string" ? data : data.toString("utf8")
+  if (app.viewMode === "grid" && app.directGrid) processGridInput(str)
+  else processPickerInput(str)
 }
