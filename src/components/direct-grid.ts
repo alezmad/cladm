@@ -405,24 +405,24 @@ export class DirectGridRenderer {
       const bw = dp.width + 2
 
       // Top border row — framed [●] buttons
-      // Blue folder [●] is rightmost, separated by ─ from traffic lights
+      // Order from right: ─[●] ─[●] [●] [●]─╮  = blue folder, gap, green/yellow, red close
       if (row === by) {
-        // folder: ...─[●]─╮  → bw-5..bw-3
-        if (col >= bx + bw - 5 && col <= bx + bw - 3) return { action: "openfolder", paneIndex: i }
+        // close (red): rightmost, positions bw-5..bw-3 (before ─╮)
+        if (col >= bx + bw - 5 && col <= bx + bw - 3) return { action: this.isExpanded ? "closepane" : "closepane", paneIndex: i }
         if (this.isExpanded) {
-          // Layout: ...─[●] [●] [●] ─[●]─╮
-          // sel: bw-10..bw-8
-          if (col >= bx + bw - 10 && col <= bx + bw - 8) return { action: "sel", paneIndex: i }
-          // min: bw-14..bw-12
-          if (col >= bx + bw - 14 && col <= bx + bw - 12) return { action: "min", paneIndex: i }
-          // close: bw-18..bw-16
-          if (col >= bx + bw - 18 && col <= bx + bw - 16) return { action: "closepane", paneIndex: i }
+          // Layout: ...─[●] ─[●] [●] [●]─╮
+          // min (yellow): bw-9..bw-7
+          if (col >= bx + bw - 9 && col <= bx + bw - 7) return { action: "min", paneIndex: i }
+          // sel (green): bw-13..bw-11
+          if (col >= bx + bw - 13 && col <= bx + bw - 11) return { action: "sel", paneIndex: i }
+          // folder (blue): bw-18..bw-16 (after ─ gap)
+          if (col >= bx + bw - 18 && col <= bx + bw - 16) return { action: "openfolder", paneIndex: i }
         } else {
-          // Layout: ...─[●] [●] ─[●]─╮
-          // max: bw-10..bw-8
-          if (col >= bx + bw - 10 && col <= bx + bw - 8) return { action: "max", paneIndex: i }
-          // close: bw-14..bw-12
-          if (col >= bx + bw - 14 && col <= bx + bw - 12) return { action: "closepane", paneIndex: i }
+          // Layout: ...─[●] ─[●] [●]─╮
+          // max (green): bw-9..bw-7
+          if (col >= bx + bw - 9 && col <= bx + bw - 7) return { action: "max", paneIndex: i }
+          // folder (blue): bw-14..bw-12 (after ─ gap)
+          if (col >= bx + bw - 14 && col <= bx + bw - 12) return { action: "openfolder", paneIndex: i }
         }
         continue
       }
@@ -839,14 +839,14 @@ export class DirectGridRenderer {
     let btnSection: string
     let btnVisibleLen: number
     if (this.isExpanded) {
-      // Expanded: show close · minimize · select · folder
+      // Expanded: folder · gap · select · minimize · close
       const selBtn = this._selectMode ? `${hexFg("#9ece6a")}${BOLD}[●]${RESET}` : DIM_BTN
-      btnSection = `${borderColor}${hz}${RESET}${RED_BTN} ${YELLOW_BTN} ${selBtn}${borderColor} ${hz}${RESET}${BLUE_BTN}${borderColor}`
-      btnVisibleLen = 1 + 3 + 1 + 3 + 1 + 3 + 1 + 1 + 3 // ─[●] [●] [●] ─[●]
+      btnSection = `${borderColor}${hz}${RESET}${BLUE_BTN}${borderColor} ${hz}${RESET}${selBtn} ${YELLOW_BTN} ${RED_BTN}${borderColor}`
+      btnVisibleLen = 1 + 3 + 1 + 1 + 3 + 1 + 3 + 1 + 3 // ─[●] ─[●] [●] [●]
     } else {
-      // Grid: show close · expand · folder
-      btnSection = `${borderColor}${hz}${RESET}${RED_BTN} ${GREEN_BTN}${borderColor} ${hz}${RESET}${BLUE_BTN}${borderColor}`
-      btnVisibleLen = 1 + 3 + 1 + 3 + 1 + 1 + 3 // ─[●] [●] ─[●]
+      // Grid: folder · gap · expand · close
+      btnSection = `${borderColor}${hz}${RESET}${BLUE_BTN}${borderColor} ${hz}${RESET}${GREEN_BTN} ${RED_BTN}${borderColor}`
+      btnVisibleLen = 1 + 3 + 1 + 1 + 3 + 1 + 3 // ─[●] ─[●] [●]
     }
     const hzFill = Math.max(0, bw - 2 - btnVisibleLen - 1)
     out += `\x1b[${by};${bx}H${borderColor}${tl}${hz.repeat(hzFill)}${btnSection}${hz}${tr}${RESET}`
