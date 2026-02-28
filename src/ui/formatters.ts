@@ -22,7 +22,25 @@ export function fmtSyncIndicator(ahead: number, behind: number): string {
   return parts.join("")
 }
 
-export function fmtProjectRow(project: import("../lib/types").Project, isSelected: boolean) {
+const TAB_COLORS = [
+  cyan,      // 1
+  green,     // 2
+  yellow,    // 3
+  magenta,   // 4
+  (s: string) => fg("#ff9e64")(s),  // 5
+  (s: string) => fg("#7dcfff")(s),  // 6
+  (s: string) => fg("#bb9af7")(s),  // 7
+  (s: string) => fg("#73daca")(s),  // 8
+  (s: string) => fg("#b4f9f8")(s),  // 9
+]
+
+function fmtTabCheck(tabNum: number | undefined) {
+  if (tabNum === undefined) return " "
+  const color = TAB_COLORS[(tabNum - 1) % TAB_COLORS.length]!
+  return color(String(tabNum))
+}
+
+export function fmtProjectRow(project: import("../lib/types").Project, isSelected: number | undefined) {
   let activeDot: string
   let activeTag: string
   if (project.activeSessions > 0) {
@@ -39,7 +57,7 @@ export function fmtProjectRow(project: import("../lib/types").Project, isSelecte
     activeDot = dim("○")
     activeTag = "  "
   }
-  const check = isSelected ? green("✓") : " "
+  const check = fmtTabCheck(isSelected)
   const arrow = project.expanded ? "▼" : "▶"
   const name =
     project.name.length > 28 ? project.name.slice(0, 25) + "..." : project.name
@@ -80,7 +98,7 @@ export function fmtSessionRow(
 ) {
   const project = app.projects[projectIdx]
   const session = project.sessions![sessionIdx]
-  const check = isSelected ? green("✓") : " "
+  const check = isSelected ? green("✓") : " "  // sessions still use boolean check
   const prefix = isLastSession ? "│ " : "├─"
   const title =
     session.title.length > 55
@@ -123,8 +141,8 @@ export function fmtSessionRow(
       ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
 }
 
-export function fmtNewSessionRow(projectIdx: number, isSelected: boolean) {
-  const check = isSelected ? green("✓") : " "
+export function fmtNewSessionRow(projectIdx: number, isSelected: number | undefined) {
+  const check = fmtTabCheck(isSelected)
   return t`      ${dim("└─")} [${check}] ${green("+ New session")}`
 }
 

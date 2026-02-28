@@ -103,17 +103,20 @@ export function updateTabBar() {
 
 export function updateHeader() {
   const total = app.selectedProjects.size + app.selectedSessions.size
+  // Count distinct tab groups
+  const tabGroups = new Set(app.selectedProjects.values())
+  const tabNote = tabGroups.size > 1 ? ` → ${tabGroups.size} tabs` : ""
   const branchNote = app.selectedBranches.size > 0 ? ` (${app.selectedBranches.size} branch switch)` : ""
   const modeLabel = app.demoMode ? " [DEMO]" : ""
   const activeCount = app.projects.reduce((sum, p) => sum + (p.activeSessions > 0 ? 1 : 0), 0)
   const busyCount = app.projects.reduce((sum, p) => sum + (p.busySessions > 0 ? 1 : 0), 0)
   const idleCount = activeCount - busyCount
   if (activeCount > 0) {
-    app.headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${branchNote}   ${dim(
+    app.headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${tabNote}${branchNote}   ${dim(
       `sort: ${app.sortLabels[app.sortMode]} │ ${app.projects.length} projects`
     )} │ ${green(`${busyCount} busy`)} ${yellow(`${idleCount} idle`)}`
   } else {
-    app.headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${branchNote}   ${dim(
+    app.headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${tabNote}${branchNote}   ${dim(
       `sort: ${app.sortLabels[app.sortMode]} │ ${app.projects.length} projects`
     )}`
   }
@@ -291,14 +294,14 @@ function renderRowContent(i: number) {
   let content: ReturnType<typeof t>
   let rowHeight = 1
   if (row.type === "project") {
-    content = fmtProjectRow(project, app.selectedProjects.has(project.path))
+    content = fmtProjectRow(project, app.selectedProjects.get(project.path))
   } else if (row.type === "session") {
     content = fmtSessionRow(row.projectIndex, row.sessionIndex!, app.selectedSessions.has(project.sessions![row.sessionIndex!].id), false)
     rowHeight = 3
   } else if (row.type === "branch") {
     content = fmtBranchRow(row.projectIndex, row.branchName!, app.selectedBranches.get(project.path) === row.branchName)
   } else {
-    content = fmtNewSessionRow(row.projectIndex, app.selectedProjects.has(project.path))
+    content = fmtNewSessionRow(row.projectIndex, app.selectedProjects.get(project.path))
   }
 
   const isCursor = i === app.cursor

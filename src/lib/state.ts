@@ -18,7 +18,7 @@ export const app = {
 
   // Data
   projects: [] as Project[],
-  selectedProjects: new Set<string>(),
+  selectedProjects: new Map<string, number>(),  // path → tab number
   selectedSessions: new Set<string>(),
   selectedBranches: new Map<string, string>(),
   cursor: 0,

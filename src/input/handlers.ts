@@ -56,10 +56,20 @@ function toggleSetItem<T>(set: Set<T>, item: T) {
   else set.add(item)
 }
 
+const MAX_TAB_NUM = 9
+
 function toggleRowSelection(row: DisplayRow) {
   const project = app.projects[row.projectIndex]
   if (row.type === "project" || row.type === "new-session") {
-    toggleSetItem(app.selectedProjects, project.path)
+    // Cycle tab number: none → 1 → 2 → ... → 9 → none
+    const current = app.selectedProjects.get(project.path)
+    if (current === undefined) {
+      app.selectedProjects.set(project.path, 1)
+    } else if (current < MAX_TAB_NUM) {
+      app.selectedProjects.set(project.path, current + 1)
+    } else {
+      app.selectedProjects.delete(project.path)
+    }
   } else if (row.type === "session") {
     toggleSetItem(app.selectedSessions, project.sessions![row.sessionIndex!].id)
   } else if (row.type === "branch") {
@@ -67,6 +77,18 @@ function toggleRowSelection(row: DisplayRow) {
       app.selectedBranches.delete(project.path)
     } else {
       app.selectedBranches.set(project.path, row.branchName!)
+    }
+  }
+}
+
+function assignTabNumber(row: DisplayRow, tabNum: number) {
+  const project = app.projects[row.projectIndex]
+  if (row.type === "project" || row.type === "new-session") {
+    const current = app.selectedProjects.get(project.path)
+    if (current === tabNum) {
+      app.selectedProjects.delete(project.path)  // toggle off if same number
+    } else {
+      app.selectedProjects.set(project.path, tabNum)
     }
   }
 }
@@ -290,7 +312,7 @@ export async function handleKeypress(key: KeyEvent) {
     }
 
     case "a":
-      for (const p of app.projects) app.selectedProjects.add(p.path)
+      for (const p of app.projects) app.selectedProjects.set(p.path, 1)
       break
 
     case "n":
@@ -339,7 +361,7 @@ export async function handleKeypress(key: KeyEvent) {
     case "o": {
       if (app.selectedProjects.size === 0 && app.selectedSessions.size === 0) {
         const oRow = app.displayRows[app.cursor]
-        if (oRow) app.selectedProjects.add(app.projects[oRow.projectIndex].path)
+        if (oRow) app.selectedProjects.set(app.projects[oRow.projectIndex].path, 1)
       }
       if (app.selectedProjects.size > 0 || app.selectedSessions.size > 0) {
         await launchSelections(app.projects, app.selectedProjects, app.selectedSessions, app.selectedBranches)
@@ -347,6 +369,13 @@ export async function handleKeypress(key: KeyEvent) {
         app.selectedSessions.clear()
         app.selectedBranches.clear()
       }
+      break
+    }
+
+    case "1": case "2": case "3": case "4": case "5":
+    case "6": case "7": case "8": case "9": {
+      const row = app.displayRows[app.cursor]
+      assignTabNumber(row, parseInt(key.name))
       break
     }
 

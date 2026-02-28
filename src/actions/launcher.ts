@@ -9,13 +9,13 @@ interface LaunchItem {
 
 export async function launchSelections(
   projects: Project[],
-  selectedProjects: Set<string>,
+  selectedProjects: Map<string, number>,
   selectedSessions: Set<string>,
   selectedBranches: Map<string, string> = new Map()
 ): Promise<number> {
   const byProject = new Map<string, LaunchItem[]>()
 
-  for (const path of selectedProjects) {
+  for (const [path] of selectedProjects) {
     if (!byProject.has(path)) byProject.set(path, [])
     const targetBranch = selectedBranches.get(path)
     const project = projects.find(p => p.path === path)
@@ -50,7 +50,7 @@ export async function launchSelections(
 
   let count = 0
   for (const [, items] of byProject) {
-    const first = items[0]
+    const first = items[0]!
     const firstCmd = buildCmd(first)
 
     const newWindowScript = [
@@ -65,7 +65,7 @@ export async function launchSelections(
 
     for (let i = 1; i < items.length; i++) {
       await Bun.sleep(400)
-      const cmd = buildCmd(items[i])
+      const cmd = buildCmd(items[i]!)
 
       await runOsascript(
         'tell application "System Events" to keystroke "t" using command down'
