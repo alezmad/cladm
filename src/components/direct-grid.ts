@@ -370,7 +370,7 @@ export class DirectGridRenderer {
 
   // Check if a click hit a button on the top border. Returns action + pane index.
   // Hit areas are widened beyond the visible dot characters to make clicking easier.
-  checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab" | "panefocus" | "closetab" | "closepane", paneIndex: number, tabId?: number } | null {
+  checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab" | "panefocus" | "closetab" | "closepane" | "openfolder", paneIndex: number, tabId?: number } | null {
     // Tab bar check (row 1) — includes inline pane names
     if (row === 1) {
       // Check close buttons first — widened ±1 around the × character
@@ -427,6 +427,14 @@ export class DirectGridRenderer {
       // Title row (by+1) — click to expand/focus
       if (row === by + 1 && !this.isExpanded) {
         return { action: "max", paneIndex: i }
+      }
+
+      // Subtitle row (by+2) — folder button [▸] at right edge
+      if (row === by + 2) {
+        const folderBtnCol = bx + bw - 1 - 3 - 1 // matches render position
+        if (col >= folderBtnCol && col <= folderBtnCol + 2) {
+          return { action: "openfolder", paneIndex: i }
+        }
       }
     }
     return null
@@ -864,8 +872,14 @@ export class DirectGridRenderer {
     out += `\x1b[${by + 1};${bx}H${borderColor}${vt}${RESET}\x1b[${bw - 2}X${titleContent}`
     out += `\x1b[${by + 1};${bx + bw - 1}H${borderColor}${vt}${RESET}`
 
-    // Subtitle row
-    out += `\x1b[${by + 2};${bx}H${borderColor}${vt}${RESET}\x1b[${bw - 2}X ${DIM}${pane.session.projectPath}${RESET}`
+    // Subtitle row — path + open folder button
+    const FOLDER_BTN = `${hexFg("#7dcfff")}[▸]${RESET}`
+    const maxPathLen = bw - 2 - 1 - 1 - 3 - 1 // border - pad - space - [▸] - pad
+    const pathStr = pane.session.projectPath.length > maxPathLen
+      ? "…" + pane.session.projectPath.slice(-(maxPathLen - 1))
+      : pane.session.projectPath
+    out += `\x1b[${by + 2};${bx}H${borderColor}${vt}${RESET}\x1b[${bw - 2}X ${DIM}${pathStr}${RESET}`
+    out += `\x1b[${by + 2};${bx + bw - 1 - 3 - 1}H${FOLDER_BTN}`
     out += `\x1b[${by + 2};${bx + bw - 1}H${borderColor}${vt}${RESET}`
 
     // Side borders for content rows

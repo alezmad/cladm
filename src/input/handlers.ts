@@ -715,6 +715,11 @@ function processGridInput(str: string) {
       else if (btn?.action === "max") { dg.cancelPendingClose(); dg.expandPane(btn.paneIndex) }
       else if (btn?.action === "min") { dg.cancelPendingClose(); dg.collapsePane() }
       else if (btn?.action === "sel") { dg.cancelPendingClose(); dg.enterSelectMode() }
+      else if (btn?.action === "openfolder") {
+        dg.cancelPendingClose()
+        const p = dg.getTabPanes(dg.activeTabId)[btn.paneIndex]
+        if (p) Bun.spawn(["open", p.session.projectPath])
+      }
       else if (btn?.action === "tab") {
         dg.cancelPendingClose()
         if (btn.tabId === -1) {
