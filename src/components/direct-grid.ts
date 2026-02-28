@@ -89,6 +89,31 @@ export class DirectGridRenderer {
     this.writeRaw(SHOW_CURSOR)
   }
 
+  pause() {
+    this.running = false
+    if (this.titleTimer) { clearInterval(this.titleTimer); this.titleTimer = null }
+    // Detach frame listeners (stops rendering) but keep captures alive
+    for (const p of this.panes) p.directPane.detach()
+  }
+
+  resume() {
+    this.running = true
+    this.writeRaw(HIDE_CURSOR + CLEAR)
+    // Reattach frame listeners and redraw
+    for (let i = 0; i < this.panes.length; i++) {
+      const p = this.panes[i]
+      const dp = p.directPane
+      const idx = i
+      dp.attach(p.session.name)
+      dp.onFrame = (lines) => {
+        if (!this.running) return
+        this.drawPane(idx, lines)
+      }
+    }
+    this.repositionAll()
+    this.titleTimer = setInterval(() => this.refreshTitles(), 1000)
+  }
+
   // ─── Getters ───────────────────────────────────────────
 
   get focusIndex() { return this._focusIndex }

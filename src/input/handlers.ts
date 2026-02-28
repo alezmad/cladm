@@ -345,7 +345,7 @@ export function switchToPicker() {
   app.viewMode = "picker"
   if (app.directGrid) {
     if (app.directGrid.selectMode) app.directGrid.exitSelectMode()
-    if (app.directGrid.paneCount > 0) app.directGrid.stop()
+    if (app.directGrid.paneCount > 0) app.directGrid.pause()
   }
   app.renderer.resume()
   process.stdin.removeAllListeners("data")

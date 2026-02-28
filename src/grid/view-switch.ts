@@ -9,7 +9,8 @@ export function ensureGridView() {
 export function switchToGrid() {
   app.viewMode = "grid"
 
-  if (!app.directGrid) {
+  const isNew = !app.directGrid
+  if (isNew) {
     app.directGrid = new DirectGridRenderer(app.rawStdoutWrite)
   }
 
@@ -20,7 +21,12 @@ export function switchToGrid() {
   app.rawStdoutWrite("\x1b[?1049h")
   app.rawStdoutWrite("\x1b[?1000h")
   app.rawStdoutWrite("\x1b[?1006h")
-  app.directGrid.start()
+
+  if (isNew || app.directGrid.paneCount === 0) {
+    app.directGrid.start()
+  } else {
+    app.directGrid.resume()
+  }
 }
 
 export function resizeGridPanes() {
