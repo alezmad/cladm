@@ -496,6 +496,13 @@ export async function handleGridInput(rawSequence: string): Promise<boolean> {
     return true
   }
 
+  // Ctrl+S → toggle select mode (disable mouse tracking for native text selection)
+  if (rawSequence === "\x13") {
+    if (app.directGrid.selectMode) app.directGrid.exitSelectMode()
+    else app.directGrid.enterSelectMode()
+    return true
+  }
+
   // Ctrl+E → toggle click-to-expand
   if (rawSequence === "\x05") {
     app.clickExpand = !app.clickExpand
@@ -592,6 +599,8 @@ function processGridInput(str: string) {
   for (const me of mouseEvents) {
     if (me.btn === 64) { dg.sendScrollToFocused("up", 3); continue }
     if (me.btn === 65) { dg.sendScrollToFocused("down", 3); continue }
+    // Shift+click (btn bit 2 = shift modifier) → enter select mode for native text selection
+    if ((me.btn & 4) && !me.release) { dg.enterSelectMode(); return }
     if (me.btn === 0 && !me.release) {
       const btn = dg.checkButtonClick(me.col, me.row)
       if (btn?.action === "closetab" && btn.tabId !== undefined) {

@@ -95,7 +95,13 @@ export function updatePaneList() {
       const short = name.length > 14 ? name.slice(0, 12) + "…" : name
       const isFocused = app.directGrid!.activeTabId === tab.id && app.directGrid!.focusIndex === pi
 
+      // Status icon: ● green=running, ◉ yellow=idle, ○ dim=unknown
+      const statusIcon = pane.status === "busy" ? green("●")
+        : pane.status === "idle" ? yellow("◉")
+        : dim("○")
+
       if (!first) parts.push(dim(" · "))
+      parts.push(statusIcon)
       parts.push(isFocused ? bold(short) : dim(short))
       first = false
     }
@@ -126,7 +132,7 @@ export function updateTabBar() {
     const isActive = app.viewMode === "grid" && app.directGrid?.activeTabId === tab.id
     const isPending = app.directGrid?.pendingCloseTabId === tab.id
     const label = `${tab.name} (${count})`
-    const closeBtn = isPending ? t` ${red(bold("●"))}` : t` ${dim("×")}`
+    const closeBtn = isPending ? t` ${red(bold("[●]"))}` : t` ${dim("[×]")}`
 
     if (isActive) {
       parts.push(dim("╭"), t` ${cyan("●")} ${bold(label)}`, closeBtn, t` ${dim("╮")}`)

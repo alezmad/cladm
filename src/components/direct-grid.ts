@@ -185,18 +185,37 @@ export class DirectGridRenderer {
   get activeTabId() { return this._activeTabId }
 
   enterSelectMode() {
-    if (!this.isExpanded) return
     this._selectMode = true
     this.writeRaw("\x1b[?1000l\x1b[?1006l")
     this.writeRaw(SHOW_CURSOR)
-    this.drawChrome()
+    this.drawSelectView()
   }
 
   exitSelectMode() {
     this._selectMode = false
     this.writeRaw("\x1b[?1000h\x1b[?1006h")
-    this.writeRaw(HIDE_CURSOR)
-    this.drawChrome()
+    this.writeRaw(HIDE_CURSOR + CLEAR)
+    this.forceRedrawAll()
+  }
+
+  private drawSelectView() {
+    const pane = this.focusedPane
+    if (!pane) return
+    const termW = process.stdout.columns || 120
+    const termH = process.stdout.rows || 40
+    const frame = getLatestFrame(pane.session.name)
+    const lines = frame?.lines ?? []
+
+    let out = SYNC_START + CLEAR
+    // Header: project name + select instructions
+    const color = getColor(pane.session.colorIndex)
+    out += `\x1b[1;1H${hexFg(color)}${BOLD}${pane.session.projectName}${RESET}  ${DIM}SELECT MODE — drag to select │ cmd+c copy │ Esc exit${RESET}`
+    // Render pane content starting at row 2, column 1 — flush left, no borders
+    for (let r = 0; r < Math.min(lines.length, termH - 2); r++) {
+      out += `\x1b[${r + 2};1H\x1b[${termW}X${lines[r]}\x1b[0m`
+    }
+    out += SYNC_END
+    this.writeRaw(out)
   }
 
   expandPane(index?: number) {
@@ -379,22 +398,22 @@ export class DirectGridRenderer {
       const by = dp.screenY - 3
       const bw = dp.width + 2
 
-      // Top border row — traffic light buttons with widened hit areas
+      // Top border row — framed [●] buttons
       if (row === by) {
         if (this.isExpanded) {
-          // Layout: ...─● ● ●─╮  (close=bw-7, min=bw-5, sel=bw-3)
-          // sel (rightmost): dot + border + corner = 3 chars
-          if (col >= bx + bw - 4 && col <= bx + bw - 1) return { action: "sel", paneIndex: i }
-          // min: dot ± 1 = 3 chars
-          if (col >= bx + bw - 6 && col <= bx + bw - 4) return { action: "min", paneIndex: i }
-          // close: border + dot = 2 chars (smaller to avoid accidents)
-          if (col >= bx + bw - 8 && col <= bx + bw - 6) return { action: "closepane", paneIndex: i }
+          // Layout: ...─[●] [●] [●]─╮
+          // sel: bw-5..[●]..bw-3 + trailing border
+          if (col >= bx + bw - 5 && col <= bx + bw - 1) return { action: "sel", paneIndex: i }
+          // min: bw-9..[●]..bw-7 + space
+          if (col >= bx + bw - 9 && col <= bx + bw - 6) return { action: "min", paneIndex: i }
+          // close: bw-13..[●]..bw-11 + space
+          if (col >= bx + bw - 13 && col <= bx + bw - 10) return { action: "closepane", paneIndex: i }
         } else {
-          // Layout: ...─● ●─╮  (close=bw-5, max=bw-3)
-          // max (rightmost): space + dot + border + corner = 4 chars
-          if (col >= bx + bw - 4 && col <= bx + bw - 1) return { action: "max", paneIndex: i }
-          // close: border + dot + space = 3 chars
-          if (col >= bx + bw - 7 && col <= bx + bw - 5) return { action: "closepane", paneIndex: i }
+          // Layout: ...─[●] [●]─╮
+          // max: bw-5..[●]..bw-3 + trailing border
+          if (col >= bx + bw - 5 && col <= bx + bw - 1) return { action: "max", paneIndex: i }
+          // close: bw-9..[●]..bw-7 + space
+          if (col >= bx + bw - 9 && col <= bx + bw - 6) return { action: "closepane", paneIndex: i }
         }
         continue
       }
@@ -580,7 +599,7 @@ export class DirectGridRenderer {
   // ─── Chrome ────────────────────────────────────────────
 
   drawChrome() {
-    if (!this.running) return
+    if (!this.running || this._selectMode) return
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
 
@@ -601,13 +620,13 @@ export class DirectGridRenderer {
       headerRight = `${DIM}drag to select │ cmd+c copy │ ${BOLD}Esc${RESET}${DIM} exit select${RESET}`
     } else if (this.isExpanded) {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${hexFg("#7dcfff")}${BOLD}EXPANDED${RESET} │ ${fi}/${n}`
-      headerRight = `${DIM}${hexFg("#f7768e")}●${RESET}${DIM} close │ ${hexFg("#e0af68")}●${RESET}${DIM} restore │ ${hexFg("#9ece6a")}●${RESET}${DIM} select │ ctrl+space picker${RESET}`
+      headerRight = `${DIM}${hexFg("#f7768e")}[●]${RESET}${DIM} close │ ${hexFg("#e0af68")}[●]${RESET}${DIM} restore │ ${hexFg("#9ece6a")}[●]${RESET}${DIM} select │ ctrl+space picker${RESET}`
     } else if (this.isSoftExpanded) {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${hexFg("#bb9af7")}${BOLD}FOCUS${RESET} │ ${fi}/${n}`
-      headerRight = `${DIM}click pane to focus │ ${hexFg("#9ece6a")}●${RESET}${DIM} fullscreen │ ctrl+e toggle${RESET}`
+      headerRight = `${DIM}click pane to focus │ ${hexFg("#9ece6a")}[●]${RESET}${DIM} fullscreen │ ctrl+s select │ ctrl+e toggle${RESET}`
     } else {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${n} sessions │ focus: ${fi}/${n}`
-      headerRight = `${DIM}shift+arrows nav │ ${hexFg("#f7768e")}●${RESET}${DIM} close ${hexFg("#9ece6a")}●${RESET}${DIM} expand │ ctrl+space picker${RESET}`
+      headerRight = `${DIM}shift+arrows nav │ ${hexFg("#f7768e")}[●]${RESET}${DIM} close ${hexFg("#9ece6a")}[●]${RESET}${DIM} expand │ ctrl+s select │ ctrl+space picker${RESET}`
     }
     out += `\x1b[3;1H\x1b[${termW}X${headerLeft}   ${headerRight}`
 
@@ -626,7 +645,7 @@ export class DirectGridRenderer {
       out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg("#9ece6a")}${BOLD}SELECT MODE${RESET}  ${DIM}drag to select text │ cmd+c to copy │ press ${BOLD}Esc${RESET}${DIM} to exit${RESET}`
     } else if (this.isExpanded && pane) {
       const color = getColor(pane.session.colorIndex)
-      out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg(color)}▸${RESET} ${BOLD}${pane.session.projectName}${RESET}   ${DIM}expanded │ Esc or ${hexFg("#e0af68")}●${RESET}${DIM} to restore grid${RESET}`
+      out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg(color)}▸${RESET} ${BOLD}${pane.session.projectName}${RESET}   ${DIM}expanded │ ctrl+s select │ Esc or ${hexFg("#e0af68")}[●]${RESET}${DIM} to restore grid${RESET}`
     } else if (pane) {
       const color = getColor(pane.session.colorIndex)
       const sid = pane.session.sessionId ? ` ${DIM}#${pane.session.sessionId.slice(0, 8)}${RESET}` : ""
@@ -675,9 +694,9 @@ export class DirectGridRenderer {
       const startCol = col + (isActive ? 2 : 1) // account for ╭ + space or just space
       const visLen = 2 + label.length // "● " + label
 
-      // Close button text
-      const closeText = isPending ? `${RED_FG}${BOLD}●${RESET}` : `${DIM}×${RESET}`
-      const closeVisLen = 1
+      // Close button text — framed for visibility
+      const closeText = isPending ? `${RED_FG}${BOLD}[●]${RESET}` : `${DIM}[×]${RESET}`
+      const closeVisLen = 3
 
       if (isActive) {
         // Chrome-style raised active tab
@@ -732,13 +751,19 @@ export class DirectGridRenderer {
         const short = name.length > 14 ? name.slice(0, 12) + "…" : name
         const color = getColor(pane.session.colorIndex)
 
+        // Status icon: ● green=running, ◉ yellow=idle, ○ dim=unknown
+        let statusIcon: string
+        if (pane.status === "busy") statusIcon = `${hexFg("#9ece6a")}●${RESET}`
+        else if (pane.status === "idle") statusIcon = `${hexFg("#e0af68")}◉${RESET}`
+        else statusIcon = `${DIM}○${RESET}`
+
         const startCol = col
         if (isFocused) {
-          out += `${hexFg(color)}${BOLD}${short}${RESET}`
+          out += `${statusIcon}${hexFg(color)}${BOLD}${short}${RESET}`
         } else {
-          out += `${DIM}${short}${RESET}`
+          out += `${statusIcon}${DIM}${short}${RESET}`
         }
-        col += short.length
+        col += 1 + short.length // icon + name
         this.paneListHitRegions.push({ tabId: tab.id, paneIndex: pi, startCol, endCol: col - 1 })
 
         if (pi < tabPanes.length - 1) {
@@ -782,23 +807,23 @@ export class DirectGridRenderer {
 
     let out = ""
 
-    // Top border with traffic-light buttons (macOS style: close, minimize, expand)
-    const RED_DOT = `${hexFg("#f7768e")}●${RESET}`       // close pane
-    const YELLOW_DOT = `${hexFg("#e0af68")}●${RESET}`    // minimize / collapse
-    const GREEN_DOT = `${hexFg("#9ece6a")}●${RESET}`     // expand / maximize
-    const DIM_DOT = `${DIM}●${RESET}`
+    // Top border with traffic-light buttons — framed for visibility
+    const RED_BTN = `${hexFg("#f7768e")}[●]${RESET}`       // close pane
+    const YELLOW_BTN = `${hexFg("#e0af68")}[●]${RESET}`    // minimize / collapse
+    const GREEN_BTN = `${hexFg("#9ece6a")}[●]${RESET}`     // expand / maximize
+    const DIM_BTN = `${DIM}[●]${RESET}`
 
     let btnSection: string
     let btnVisibleLen: number
     if (this.isExpanded) {
       // Expanded: show close · minimize · select(green means select mode)
-      const selDot = this._selectMode ? `${hexFg("#9ece6a")}${BOLD}●${RESET}` : DIM_DOT
-      btnSection = `${borderColor}${hz}${RESET}${RED_DOT} ${YELLOW_DOT} ${selDot}${borderColor}`
-      btnVisibleLen = 1 + 1 + 1 + 1 + 1 + 1 + 1 // ─● ● ●
+      const selBtn = this._selectMode ? `${hexFg("#9ece6a")}${BOLD}[●]${RESET}` : DIM_BTN
+      btnSection = `${borderColor}${hz}${RESET}${RED_BTN} ${YELLOW_BTN} ${selBtn}${borderColor}`
+      btnVisibleLen = 1 + 3 + 1 + 3 + 1 + 3 // ─[●] [●] [●]
     } else {
       // Grid: show close · expand
-      btnSection = `${borderColor}${hz}${RESET}${RED_DOT} ${GREEN_DOT}${borderColor}`
-      btnVisibleLen = 1 + 1 + 1 + 1 // ─● ●
+      btnSection = `${borderColor}${hz}${RESET}${RED_BTN} ${GREEN_BTN}${borderColor}`
+      btnVisibleLen = 1 + 3 + 1 + 3 // ─[●] [●]
     }
     const hzFill = Math.max(0, bw - 2 - btnVisibleLen - 1)
     out += `\x1b[${by};${bx}H${borderColor}${tl}${hz.repeat(hzFill)}${btnSection}${hz}${tr}${RESET}`
@@ -840,6 +865,10 @@ export class DirectGridRenderer {
   // ─── Content rendering ─────────────────────────────────
 
   private drawPane(index: number, lines: string[]) {
+    if (this._selectMode) {
+      if (index === this._focusIndex) this.drawSelectView()
+      return
+    }
     if (this.isExpanded && index !== this._expandedIndex) return
     const pane = this.panes[index]
     if (!pane) return
