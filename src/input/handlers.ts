@@ -11,6 +11,7 @@ import { generateMockSessions, generateMockBranches } from "../data/mock"
 import { focusTerminalByPath, populateMockSessionStatus } from "../data/monitor"
 import { stopAllCaptures } from "../pty/capture"
 import type { DisplayRow } from "../lib/types"
+import { extractSessionState, saveSessionSync, restoreSession } from "../data/session-store"
 
 // ─── Constants ───────────────────────────────────────────────────────
 
@@ -216,27 +217,62 @@ export function handlePickerClick(_col: number, screenRow: number) {
 function handlePickerTabBarClick(col: number, screenRow: number) {
   // Tab bar is at row 1 in picker (rendered as OpenTUI text)
   if (screenRow !== 1) return false
-  // Hit test against tab bar positions (approximate, since OpenTUI renders it)
-  // We compute positions similar to the grid tab bar
-  let c = 2
-  // Picker tab
-  const pickerEnd = c + 7
+  // Hit test against tab bar positions — Chrome-style layout
+  // Picker: ╭ ● Picker ╮ = cols 1..10 (active) or  ○ Picker  = cols 1..10
+  let c = 1
+  const pickerEnd = c + 10
   if (col >= c && col <= pickerEnd) return false // already on picker
-  c += 11
+  c = 11
 
   for (const tab of app.gridTabs) {
     const count = app.directGrid?.getTabPaneCount(tab.id) ?? 0
+    const isActive = app.viewMode === "grid" && app.directGrid?.activeTabId === tab.id
     const label = `${tab.name} (${count})`
-    const visLen = 2 + label.length
-    if (col >= c && col < c + visLen) {
-      switchToGridTab(tab.id)
-      return true
+    const visLen = 2 + label.length // "● " + label
+
+    const dg = app.directGrid
+
+    if (isActive) {
+      // Active: ╭ ● label × ╮  →  c+1=╭, c+2=space, c+3..=● label, then close, ╮
+      const labelStart = c + 2
+      const labelEnd = labelStart + visLen - 1
+      const closeCol = labelEnd + 2 // space + × position
+      const totalVis = 1 + 1 + visLen + 1 + 1 + 1 + 1 // ╭ + sp + label + sp + × + sp + ╮
+
+      if (col === closeCol && dg) {
+        const result = dg.requestCloseTab(tab.id)
+        if (result === "closed") updateAll()
+        else { updateTabBar(); app.renderer.requestRender() }
+        return true
+      }
+      if (col >= labelStart && col <= labelEnd) {
+        switchToGridTab(tab.id)
+        return true
+      }
+      c += totalVis
+    } else {
+      // Inactive: sp ● label sp × sp │ → 1 + visLen + 1 + 1 + 1 + 1
+      const labelStart = c + 1
+      const labelEnd = labelStart + visLen - 1
+      const closeCol = labelEnd + 2
+      const totalVis = 1 + visLen + 1 + 1 + 1 + 1 // sp + label + sp + × + sp + │
+
+      if (col === closeCol && dg) {
+        const result = dg.requestCloseTab(tab.id)
+        if (result === "closed") updateAll()
+        else { updateTabBar(); app.renderer.requestRender() }
+        return true
+      }
+      if (col >= labelStart && col <= labelEnd) {
+        switchToGridTab(tab.id)
+        return true
+      }
+      c += totalVis
     }
-    c += visLen + 3
   }
 
   // [+] button
-  if (col >= c && col <= c + 2) {
+  if (col >= c + 1 && col <= c + 3) {
     createNewGridTab()
     return true
   }
@@ -379,10 +415,48 @@ export async function handleKeypress(key: KeyEvent) {
       break
     }
 
-    case "q":
+    case "r": {
+      if (app.restoreMode === "pending") {
+        // Second press: restore with resume
+        const saved = app.savedSession
+        if (saved) {
+          app.restoreMode = null
+          await restoreSession(saved, true)
+          return
+        }
+      } else if (app.savedSession) {
+        app.restoreMode = "pending"
+      }
+      break
+    }
+
+    case "R": {
+      if (app.restoreMode === "pending") {
+        // Shift+R: restore fresh (no sessionIds)
+        const saved = app.savedSession
+        if (saved) {
+          app.restoreMode = null
+          await restoreSession(saved, false)
+          return
+        }
+      }
+      break
+    }
+
     case "escape":
+      if (app.restoreMode === "pending") {
+        app.restoreMode = null
+        break
+      }
+      // fall through to quit
+    case "q":
       app.destroyed = true
       if (app.monitorInterval) clearInterval(app.monitorInterval)
+      // Save session before exit
+      try {
+        const state = extractSessionState()
+        if (state) saveSessionSync(state)
+      } catch {}
       stopAllCaptures()
       process.stdout.write("\x1b[?1006l")
       process.stdout.write("\x1b[?1000l")
@@ -520,10 +594,49 @@ function processGridInput(str: string) {
     if (me.btn === 65) { dg.sendScrollToFocused("down", 3); continue }
     if (me.btn === 0 && !me.release) {
       const btn = dg.checkButtonClick(me.col, me.row)
-      if (btn?.action === "max") dg.expandPane(btn.paneIndex)
-      else if (btn?.action === "min") dg.collapsePane()
-      else if (btn?.action === "sel") dg.enterSelectMode()
+      if (btn?.action === "closetab" && btn.tabId !== undefined) {
+        const result = dg.requestCloseTab(btn.tabId)
+        if (result === "closed") {
+          // Tab was closed — switch to adjacent or picker
+          if (app.gridTabs.length > 0) {
+            const currentTabId = dg.activeTabId
+            if (btn.tabId === currentTabId) {
+              // Closed the active tab — switch to first available
+              switchToGridTab(app.gridTabs[0].id)
+            } else {
+              dg.drawChrome()
+            }
+          } else {
+            switchToPicker()
+          }
+        }
+      }
+      else if (btn?.action === "closepane") {
+        dg.cancelPendingClose()
+        const pane = dg.paneCount > btn.paneIndex ? dg.getTabPanes(dg.activeTabId)[btn.paneIndex] : null
+        if (pane) {
+          if (dg.isExpanded) dg.collapsePane()
+          if (dg.isSoftExpanded) dg.softCollapsePane()
+          dg.removePane(pane.session.name)
+          if (dg.paneCount === 0) {
+            const currentTabId = dg.activeTabId
+            const tabIdx = app.gridTabs.findIndex(t => t.id === currentTabId)
+            dg.removeTab(currentTabId)
+            app.gridTabs.splice(tabIdx, 1)
+            if (app.gridTabs.length > 0) {
+              const prevIdx = Math.max(0, tabIdx - 1)
+              switchToGridTab(app.gridTabs[prevIdx].id)
+            } else {
+              switchToPicker()
+            }
+          }
+        }
+      }
+      else if (btn?.action === "max") { dg.cancelPendingClose(); dg.expandPane(btn.paneIndex) }
+      else if (btn?.action === "min") { dg.cancelPendingClose(); dg.collapsePane() }
+      else if (btn?.action === "sel") { dg.cancelPendingClose(); dg.enterSelectMode() }
       else if (btn?.action === "tab") {
+        dg.cancelPendingClose()
         if (btn.tabId === -1) {
           // Switch to picker
           app.lastGridTabIndex = app.gridTabs.findIndex(t => t.id === dg.activeTabId)
@@ -532,14 +645,16 @@ function processGridInput(str: string) {
           switchToGridTab(btn.tabId)
         }
       }
-      else if (btn?.action === "newtab") createNewGridTab()
+      else if (btn?.action === "newtab") { dg.cancelPendingClose(); createNewGridTab() }
       else if (btn?.action === "panefocus" && btn.tabId !== undefined) {
+        dg.cancelPendingClose()
         // Click on pane name in pane list → switch to that tab and focus the pane
         switchToGridTab(btn.tabId)
         dg.setFocus(btn.paneIndex)
         if (app.clickExpand) dg.softExpandPane(btn.paneIndex)
       }
       else {
+        dg.cancelPendingClose()
         // Pane body click
         if (app.clickExpand && !dg.isExpanded) {
           const clickedIdx = dg.getPaneIndexAtClick(me.col, me.row)
@@ -630,10 +745,76 @@ function processPickerInput(str: string) {
   }
 }
 
+// ─── Stdin buffering ─────────────────────────────────────────────────
+// SGR mouse sequences (\x1b[<btn;col;rowM) can be split across stdin
+// data events. Buffer partial escape sequences so fragments don't leak
+// into the PTY as garbage characters.
+
+let _pending = ""
+let _timer: ReturnType<typeof setTimeout> | null = null
+
+function dispatch(str: string) {
+  if (app.viewMode === "grid" && app.directGrid) processGridInput(str)
+  else processPickerInput(str)
+}
+
+function flushPending() {
+  _timer = null
+  if (_pending) {
+    const p = _pending
+    _pending = ""
+    dispatch(p)
+  }
+}
+
+// Returns index of a trailing partial escape sequence, or -1 if complete.
+function trailingPartialEsc(data: string): number {
+  for (let i = data.length - 1; i >= 0 && i >= data.length - 30; i--) {
+    if (data.charCodeAt(i) !== 0x1b) continue
+    const ch = data[i + 1]
+    // Lone ESC at end
+    if (ch === undefined) return i
+    // CSI: \x1b[ — check for final byte
+    if (ch === "[") {
+      let j = i + 2
+      while (j < data.length && data.charCodeAt(j) >= 0x30 && data.charCodeAt(j) <= 0x3f) j++
+      while (j < data.length && data.charCodeAt(j) >= 0x20 && data.charCodeAt(j) <= 0x2f) j++
+      if (j >= data.length) return i // no final byte yet — partial
+      continue
+    }
+    // OSC/DCS/APC/PM — need ST terminator
+    if (ch === "]" || ch === "P" || ch === "_" || ch === "^") {
+      let terminated = false
+      for (let j = i + 2; j < data.length; j++) {
+        if (data[j] === "\x07") { terminated = true; break }
+        if (data[j] === "\x1b" && data[j + 1] === "\\") { terminated = true; break }
+      }
+      if (!terminated) return i
+      continue
+    }
+    // SS3 (\x1bO) needs one more byte
+    if (ch === "O" && i + 2 >= data.length) return i
+    continue
+  }
+  return -1
+}
+
 // ─── Stdin entry point ───────────────────────────────────────────────
 
 export function stdinHandler(data: string | Buffer) {
+  if (_timer) { clearTimeout(_timer); _timer = null }
   const str = typeof data === "string" ? data : data.toString("utf8")
-  if (app.viewMode === "grid" && app.directGrid) processGridInput(str)
-  else processPickerInput(str)
+  const full = _pending + str
+  _pending = ""
+
+  const idx = trailingPartialEsc(full)
+  if (idx >= 0) {
+    _pending = full.slice(idx)
+    const ready = full.slice(0, idx)
+    if (ready) dispatch(ready)
+    _timer = setTimeout(flushPending, 8)
+    return
+  }
+
+  dispatch(full)
 }

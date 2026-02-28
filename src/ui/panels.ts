@@ -9,12 +9,14 @@ import {
   yellow,
   cyan,
   magenta,
+  red,
 } from "@opentui/core"
+import { st } from "../lib/styled"
 import { app } from "../lib/state"
 import { CURSOR_BG, ACTIVE_BG, ACCENT } from "../lib/theme"
 import { getSessionStatus, getIdleSessions } from "../data/monitor"
 import { formatCost, formatWindow, makeBar, pct, PLAN_LIMITS } from "../data/usage"
-import { timeAgo, formatSize, elapsedCompact } from "../lib/time"
+import { timeAgo, formatSize, elapsedCompact, timeAgoShort } from "../lib/time"
 import { fmtProjectRow, fmtSessionRow, fmtNewSessionRow, fmtBranchRow, fmtSyncIndicator } from "./formatters"
 
 // ─── Display rows ────────────────────────────────────────────────────
@@ -81,7 +83,7 @@ export function updatePaneList() {
     return
   }
 
-  let content = t`  `
+  const parts: Parameters<typeof st> = [t`  `]
   let first = true
   for (const tab of app.gridTabs) {
     const tabPanes = app.directGrid.getTabPanes(tab.id)
@@ -93,48 +95,50 @@ export function updatePaneList() {
       const short = name.length > 14 ? name.slice(0, 12) + "…" : name
       const isFocused = app.directGrid!.activeTabId === tab.id && app.directGrid!.focusIndex === pi
 
-      if (!first) content = t`${content}${dim(" · ")}`
-      if (isFocused) {
-        content = t`${content}${bold(short)}`
-      } else {
-        content = t`${content}${dim(short)}`
-      }
+      if (!first) parts.push(dim(" · "))
+      parts.push(isFocused ? bold(short) : dim(short))
       first = false
     }
-    content = t`${content}${dim("  │  ")}`
+    parts.push(dim("  │  "))
     first = true
   }
-  app.paneListText.content = content
+  app.paneListText.content = st(...parts)
 }
 
 export function updateTabBar() {
   if (!app.tabBarText) return
 
-  // Build tab bar segments using styled text
-  const sep = dim(" │ ")
   const pickerActive = app.viewMode === "picker"
-  const pickerTab = pickerActive ? t`${cyan("●")} ${bold("Picker")}` : t`${dim("○ Picker")}`
+  const sep = dim(" │ ")
 
-  // Start with picker
-  let content = t`  ${pickerTab}`
+  // Chrome-style: active tab gets visual emphasis
+  const parts: Parameters<typeof st> = []
+  if (pickerActive) {
+    parts.push(t` ${dim("╭")} ${cyan("●")} ${bold("Picker")} ${dim("╮")}`)
+  } else {
+    parts.push(t`  ${dim("○ Picker")} `)
+  }
 
   // Grid tabs
   for (const tab of app.gridTabs) {
     const count = app.directGrid?.getTabPaneCount(tab.id) ?? 0
     const hasIdle = app.directGrid?.hasIdleInTab(tab.id) ?? false
     const isActive = app.viewMode === "grid" && app.directGrid?.activeTabId === tab.id
+    const isPending = app.directGrid?.pendingCloseTabId === tab.id
     const label = `${tab.name} (${count})`
+    const closeBtn = isPending ? t` ${red(bold("●"))}` : t` ${dim("×")}`
+
     if (isActive) {
-      content = t`${content}${sep}${cyan("●")} ${bold(label)}`
+      parts.push(dim("╭"), t` ${cyan("●")} ${bold(label)}`, closeBtn, t` ${dim("╮")}`)
     } else if (hasIdle) {
-      content = t`${content}${sep}${yellow("◉")} ${label}`
+      parts.push(t` ${yellow("◉")} ${label}`, closeBtn, " ", sep)
     } else {
-      content = t`${content}${sep}${dim("○ " + label)}`
+      parts.push(t` ${dim("○ " + label)}`, closeBtn, " ", sep)
     }
   }
 
-  content = t`${content}${sep}${dim("[+]")}`
-  app.tabBarText.content = content
+  parts.push(t` ${dim("[+]")}`)
+  app.tabBarText.content = st(...parts)
 }
 
 // ─── Header / Footer ─────────────────────────────────────────────────
@@ -167,13 +171,28 @@ export function updateColumnHeaders() {
 
 export function updateFooter() {
   const gridHint = app.directGrid && app.directGrid.totalPaneCount > 0 ? " │ ^space grid" : ""
+
+  // Restore mode: show choice prompt
+  if (app.restoreMode === "pending") {
+    app.footerText.content = t`  ${yellow("Restore session?")} ${dim("r resume │ R fresh │ esc cancel")}`
+    return
+  }
+
+  // Saved session hint
+  let restoreHint = ""
+  if (app.savedSession) {
+    const ago = timeAgoShort(app.savedSession.savedAt)
+    const paneCount = app.savedSession.tabs.reduce((sum, t) => sum + t.panes.length, 0)
+    restoreHint = ` │ r restore (${paneCount}p, ${ago})`
+  }
+
   if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0) {
     app.footerText.content = t`  ${dim(
-      "↑↓ nav │ tab/shift-tab idle select │ enter focus │ i preview │ space select │ a all │ n none │ s sort │ q quit" + gridHint
+      "↑↓ nav │ tab/shift-tab idle select │ enter focus │ i preview │ space select │ a all │ n none │ s sort │ q quit" + gridHint + restoreHint
     )}`
   } else {
     app.footerText.content = t`  ${dim(
-      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter grid │ o external │ q quit" + gridHint
+      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter grid │ o external │ q quit" + gridHint + restoreHint
     )}`
   }
 }
@@ -310,9 +329,10 @@ export function updatePreview() {
       const selNote = selBranch === br.name
         ? t`  ${green("Selected")} — will launch with: ${dim(`-p "switch to branch ${br.name}, stash if needed"`)}`
         : t`  ${dim("Press space to select this branch for launch")}`
-      app.previewText.content = t`  ${bold("Branch:")} ${magenta(br.name)}  ${dim("Sync:")} ${sync}
+      app.previewText.content = st(
+        t`  ${bold("Branch:")} ${magenta(br.name)}  ${dim("Sync:")} ${sync}
   ${dim("Last commit:")} ${br.lastCommitAge} — ${br.lastCommitMsg}
-${selNote}`
+`, selNote)
     }
   } else {
     app.previewText.content = t`  ${green("Start a new Claude session")} in ${bold(project.name)}

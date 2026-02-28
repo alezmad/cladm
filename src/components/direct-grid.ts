@@ -84,9 +84,14 @@ export class DirectGridRenderer {
 
   // Tab bar hit-test regions (col ranges for each tab)
   private tabBarHitRegions: { tabId: number, startCol: number, endCol: number }[] = []
+  private tabCloseHitRegions: { tabId: number, startCol: number, endCol: number }[] = []
   private tabBarAddBtnCol = -1
   // Pane list hit-test regions (row 2)
   private paneListHitRegions: { tabId: number, paneIndex: number, startCol: number, endCol: number }[] = []
+
+  // Pending close state
+  private _pendingCloseTabId = -1
+  private _pendingCloseTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(rawWrite: (s: string) => boolean) {
     this.writeRaw = rawWrite
@@ -164,6 +169,7 @@ export class DirectGridRenderer {
       }
     }
     this.repositionAll()
+    setTimeout(() => this.forceRedrawAll(), 100)
     this.titleTimer = setInterval(() => this.refreshTitles(), 1000)
   }
 
@@ -253,6 +259,48 @@ export class DirectGridRenderer {
     this.tabSoftExpand.delete(tabId)
   }
 
+  // ─── Tab close (double-click confirm) ────────────────
+
+  get pendingCloseTabId() { return this._pendingCloseTabId }
+
+  requestCloseTab(tabId: number): "pending" | "closed" {
+    if (this._pendingCloseTabId === tabId) {
+      // Second click — execute close
+      this.cancelPendingClose()
+      this.closeTab(tabId)
+      return "closed"
+    }
+    // First click — mark pending
+    this.cancelPendingClose()
+    this._pendingCloseTabId = tabId
+    this._pendingCloseTimer = setTimeout(() => {
+      this._pendingCloseTabId = -1
+      this._pendingCloseTimer = null
+      this.drawChrome()
+    }, 2000)
+    this.drawChrome()
+    return "pending"
+  }
+
+  closeTab(tabId: number): number {
+    const tabIdx = app.gridTabs.findIndex(t => t.id === tabId)
+    if (tabIdx < 0) return -1
+    this.removeTab(tabId)
+    app.gridTabs.splice(tabIdx, 1)
+    return tabIdx
+  }
+
+  cancelPendingClose() {
+    if (this._pendingCloseTimer) {
+      clearTimeout(this._pendingCloseTimer)
+      this._pendingCloseTimer = null
+    }
+    if (this._pendingCloseTabId !== -1) {
+      this._pendingCloseTabId = -1
+      this.drawChrome()
+    }
+  }
+
   setActiveTab(tabId: number) {
     if (this._activeTabId === tabId) return
     // Detach current tab's panes
@@ -274,6 +322,7 @@ export class DirectGridRenderer {
     if (this.running) {
       this.writeRaw(CLEAR)
       this.repositionAll()
+      setTimeout(() => this.forceRedrawAll(), 100)
     }
   }
 
@@ -292,23 +341,31 @@ export class DirectGridRenderer {
   }
 
   // Check if a click hit a button on the top border. Returns action + pane index.
-  checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab" | "panefocus", paneIndex: number, tabId?: number } | null {
+  // Hit areas are widened beyond the visible dot characters to make clicking easier.
+  checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab" | "panefocus" | "closetab" | "closepane", paneIndex: number, tabId?: number } | null {
     // Tab bar check (row 1)
     if (row === 1) {
+      // Check close buttons first — widened ±1 around the × character
+      for (const region of this.tabCloseHitRegions) {
+        if (col >= region.startCol - 1 && col <= region.endCol + 1) {
+          return { action: "closetab", paneIndex: -1, tabId: region.tabId }
+        }
+      }
       for (const region of this.tabBarHitRegions) {
         if (col >= region.startCol && col <= region.endCol) {
           return { action: "tab", paneIndex: -1, tabId: region.tabId }
         }
       }
-      if (this.tabBarAddBtnCol > 0 && col >= this.tabBarAddBtnCol && col <= this.tabBarAddBtnCol + 2) {
+      // [+] button — widened ±1
+      if (this.tabBarAddBtnCol > 0 && col >= this.tabBarAddBtnCol - 1 && col <= this.tabBarAddBtnCol + 3) {
         return { action: "newtab", paneIndex: -1 }
       }
       return null
     }
-    // Pane list check (row 2)
+    // Pane list check (row 2) — widened ±1 for easier clicks
     if (row === 2) {
       for (const region of this.paneListHitRegions) {
-        if (col >= region.startCol && col <= region.endCol) {
+        if (col >= region.startCol - 1 && col <= region.endCol + 1) {
           return { action: "panefocus", paneIndex: region.paneIndex, tabId: region.tabId }
         }
       }
@@ -321,21 +378,30 @@ export class DirectGridRenderer {
       const bx = dp.screenX - 1
       const by = dp.screenY - 3
       const bw = dp.width + 2
-      const btnRow = by
 
-      if (row !== btnRow) continue
+      // Top border row — traffic light buttons with widened hit areas
+      if (row === by) {
+        if (this.isExpanded) {
+          // Layout: ...─● ● ●─╮  (close=bw-7, min=bw-5, sel=bw-3)
+          // sel (rightmost): dot + border + corner = 3 chars
+          if (col >= bx + bw - 4 && col <= bx + bw - 1) return { action: "sel", paneIndex: i }
+          // min: dot ± 1 = 3 chars
+          if (col >= bx + bw - 6 && col <= bx + bw - 4) return { action: "min", paneIndex: i }
+          // close: border + dot = 2 chars (smaller to avoid accidents)
+          if (col >= bx + bw - 8 && col <= bx + bw - 6) return { action: "closepane", paneIndex: i }
+        } else {
+          // Layout: ...─● ●─╮  (close=bw-5, max=bw-3)
+          // max (rightmost): space + dot + border + corner = 4 chars
+          if (col >= bx + bw - 4 && col <= bx + bw - 1) return { action: "max", paneIndex: i }
+          // close: border + dot + space = 3 chars
+          if (col >= bx + bw - 7 && col <= bx + bw - 5) return { action: "closepane", paneIndex: i }
+        }
+        continue
+      }
 
-      if (this.isExpanded) {
-        const minRight = bx + bw - 2
-        const minLeft = minRight - 4
-        if (col >= minLeft && col <= minRight) return { action: "min", paneIndex: i }
-        const selRight = minLeft - 2
-        const selLeft = selRight - 4
-        if (col >= selLeft && col <= selRight) return { action: "sel", paneIndex: i }
-      } else {
-        const btnLeft = bx + bw - 7
-        const btnRight = bx + bw - 3
-        if (col >= btnLeft && col <= btnRight) return { action: "max", paneIndex: i }
+      // Title row (by+1) — click to expand/focus
+      if (row === by + 1 && !this.isExpanded) {
+        return { action: "max", paneIndex: i }
       }
     }
     return null
@@ -374,6 +440,10 @@ export class DirectGridRenderer {
         this.drawPane(idx, lines)
       }
       this.repositionAll()
+
+      // Force-redraw all panes after a short delay to catch initial frames
+      // that may have arrived before attach or been cleared by repositionAll
+      setTimeout(() => this.forceRedrawAll(), 200)
     }
 
     return info
@@ -531,13 +601,13 @@ export class DirectGridRenderer {
       headerRight = `${DIM}drag to select │ cmd+c copy │ ${BOLD}Esc${RESET}${DIM} exit select${RESET}`
     } else if (this.isExpanded) {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${hexFg("#7dcfff")}${BOLD}EXPANDED${RESET} │ ${fi}/${n}`
-      headerRight = `${DIM}click ${BOLD}[SEL]${RESET}${DIM} select text │ click ${BOLD}[MIN]${RESET}${DIM} restore │ ctrl+space picker${RESET}`
+      headerRight = `${DIM}${hexFg("#f7768e")}●${RESET}${DIM} close │ ${hexFg("#e0af68")}●${RESET}${DIM} restore │ ${hexFg("#9ece6a")}●${RESET}${DIM} select │ ctrl+space picker${RESET}`
     } else if (this.isSoftExpanded) {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${hexFg("#bb9af7")}${BOLD}FOCUS${RESET} │ ${fi}/${n}`
-      headerRight = `${DIM}click pane to focus │ click ${BOLD}[MAX]${RESET}${DIM} fullscreen │ ctrl+e toggle${RESET}`
+      headerRight = `${DIM}click pane to focus │ ${hexFg("#9ece6a")}●${RESET}${DIM} fullscreen │ ctrl+e toggle${RESET}`
     } else {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${n} sessions │ focus: ${fi}/${n}`
-      headerRight = `${DIM}shift+arrows nav │ click ${BOLD}[MAX]${RESET}${DIM} expand │ ctrl+space picker │ ctrl+w close${RESET}`
+      headerRight = `${DIM}shift+arrows nav │ ${hexFg("#f7768e")}●${RESET}${DIM} close ${hexFg("#9ece6a")}●${RESET}${DIM} expand │ ctrl+space picker${RESET}`
     }
     out += `\x1b[3;1H\x1b[${termW}X${headerLeft}   ${headerRight}`
 
@@ -556,7 +626,7 @@ export class DirectGridRenderer {
       out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg("#9ece6a")}${BOLD}SELECT MODE${RESET}  ${DIM}drag to select text │ cmd+c to copy │ press ${BOLD}Esc${RESET}${DIM} to exit${RESET}`
     } else if (this.isExpanded && pane) {
       const color = getColor(pane.session.colorIndex)
-      out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg(color)}▸${RESET} ${BOLD}${pane.session.projectName}${RESET}   ${DIM}expanded │ Esc or [MIN] to restore grid${RESET}`
+      out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg(color)}▸${RESET} ${BOLD}${pane.session.projectName}${RESET}   ${DIM}expanded │ Esc or ${hexFg("#e0af68")}●${RESET}${DIM} to restore grid${RESET}`
     } else if (pane) {
       const color = getColor(pane.session.colorIndex)
       const sid = pane.session.sessionId ? ` ${DIM}#${pane.session.sessionId.slice(0, 8)}${RESET}` : ""
@@ -572,17 +642,27 @@ export class DirectGridRenderer {
 
   private drawTabBar(termW: number): string {
     this.tabBarHitRegions = []
+    this.tabCloseHitRegions = []
     this.tabBarAddBtnCol = -1
 
-    let out = `\x1b[1;1H\x1b[${termW}X `
-    let col = 2
+    const RED_FG = hexFg("#f7768e")
+    const TAB_BG_ACTIVE = hexBg("#24283b")
+    const TAB_BORDER = hexFg("#3b4261")
+
+    let out = `\x1b[1;1H\x1b[${termW}X`
+    let col = 1
 
     // Picker tab (id = -1, meaning: switch to picker)
     const pickerActive = app.viewMode === "picker"
-    const pickerLabel = pickerActive ? `${CYAN_FG}${BOLD}● Picker${RESET}` : `${DIM}○ Picker${RESET}`
-    out += pickerLabel + ` ${DIM}│${RESET} `
-    this.tabBarHitRegions.push({ tabId: -1, startCol: col, endCol: col + 7 })
-    col += 11 // "● Picker │ "
+    if (pickerActive) {
+      out += `${TAB_BORDER}╭${RESET}${TAB_BG_ACTIVE} ${CYAN_FG}${BOLD}● Picker${RESET}${TAB_BG_ACTIVE} ${RESET}${TAB_BORDER}╮${RESET}`
+    } else {
+      out += ` ${DIM}○ Picker${RESET} `
+    }
+    const pickerStart = pickerActive ? col + 1 : col + 1
+    const pickerVisLen = pickerActive ? 10 : 10
+    this.tabBarHitRegions.push({ tabId: -1, startCol: pickerStart, endCol: pickerStart + 7 })
+    col += pickerVisLen
 
     // Grid tabs
     for (const tab of app.gridTabs) {
@@ -590,25 +670,45 @@ export class DirectGridRenderer {
       const hasIdle = this.hasIdleInTab(tab.id)
       const count = this.getTabPaneCount(tab.id)
       const label = `${tab.name} (${count})`
+      const isPending = this._pendingCloseTabId === tab.id
 
-      let tabText: string
-      if (isActive) {
-        tabText = `${CYAN_FG}${BOLD}● ${label}${RESET}`
-      } else if (hasIdle) {
-        tabText = `${YELLOW_FG}◉ ${label}${RESET}`
-      } else {
-        tabText = `${DIM}○ ${label}${RESET}`
-      }
-
-      const startCol = col
-      out += tabText + ` ${DIM}│${RESET} `
+      const startCol = col + (isActive ? 2 : 1) // account for ╭ + space or just space
       const visLen = 2 + label.length // "● " + label
-      this.tabBarHitRegions.push({ tabId: tab.id, startCol, endCol: startCol + visLen - 1 })
-      col += visLen + 3 // + " │ "
+
+      // Close button text
+      const closeText = isPending ? `${RED_FG}${BOLD}●${RESET}` : `${DIM}×${RESET}`
+      const closeVisLen = 1
+
+      if (isActive) {
+        // Chrome-style raised active tab
+        out += `${TAB_BORDER}╭${RESET}${TAB_BG_ACTIVE} ${CYAN_FG}${BOLD}● ${label}${RESET}${TAB_BG_ACTIVE} ${closeText}${TAB_BG_ACTIVE} ${RESET}${TAB_BORDER}╮${RESET}`
+        // ╭ + space + ● label + space + × + space + ╮
+        const totalVis = 1 + 1 + visLen + 1 + closeVisLen + 1 + 1
+        this.tabBarHitRegions.push({ tabId: tab.id, startCol, endCol: startCol + visLen - 1 })
+        const closeStartCol = startCol + visLen + 1
+        this.tabCloseHitRegions.push({ tabId: tab.id, startCol: closeStartCol, endCol: closeStartCol + closeVisLen - 1 })
+        col += totalVis
+      } else {
+        // Inactive tab — flat, no border
+        let indicator: string
+        if (hasIdle) {
+          indicator = `${YELLOW_FG}◉ ${label}${RESET}`
+        } else {
+          indicator = `${DIM}○ ${label}${RESET}`
+        }
+        out += ` ${indicator} ${closeText} ${DIM}│${RESET}`
+        // space + ● label + space + × + space + │
+        const totalVis = 1 + visLen + 1 + closeVisLen + 1 + 1
+        this.tabBarHitRegions.push({ tabId: tab.id, startCol, endCol: startCol + visLen - 1 })
+        const closeStartCol = startCol + visLen + 1
+        this.tabCloseHitRegions.push({ tabId: tab.id, startCol: closeStartCol, endCol: closeStartCol + closeVisLen - 1 })
+        col += totalVis
+      }
     }
 
     // [+] button
-    out += `${DIM}[+]${RESET}`
+    out += ` ${DIM}[+]${RESET}`
+    col += 1
     this.tabBarAddBtnCol = col
     col += 3
 
@@ -682,16 +782,23 @@ export class DirectGridRenderer {
 
     let out = ""
 
-    // Top border with buttons
+    // Top border with traffic-light buttons (macOS style: close, minimize, expand)
+    const RED_DOT = `${hexFg("#f7768e")}●${RESET}`       // close pane
+    const YELLOW_DOT = `${hexFg("#e0af68")}●${RESET}`    // minimize / collapse
+    const GREEN_DOT = `${hexFg("#9ece6a")}●${RESET}`     // expand / maximize
+    const DIM_DOT = `${DIM}●${RESET}`
+
     let btnSection: string
     let btnVisibleLen: number
     if (this.isExpanded) {
-      const selColor = this._selectMode ? `${hexFg("#9ece6a")}${BOLD}` : `${DIM}`
-      btnSection = `${RESET}${selColor}[SEL]${RESET}${borderColor}${hz}${RESET}${hexFg("#7dcfff")}[MIN]${RESET}${borderColor}`
-      btnVisibleLen = 5 + 1 + 5
+      // Expanded: show close · minimize · select(green means select mode)
+      const selDot = this._selectMode ? `${hexFg("#9ece6a")}${BOLD}●${RESET}` : DIM_DOT
+      btnSection = `${borderColor}${hz}${RESET}${RED_DOT} ${YELLOW_DOT} ${selDot}${borderColor}`
+      btnVisibleLen = 1 + 1 + 1 + 1 + 1 + 1 + 1 // ─● ● ●
     } else {
-      btnSection = `${RESET}${DIM}[MAX]${RESET}${borderColor}`
-      btnVisibleLen = 5
+      // Grid: show close · expand
+      btnSection = `${borderColor}${hz}${RESET}${RED_DOT} ${GREEN_DOT}${borderColor}`
+      btnVisibleLen = 1 + 1 + 1 + 1 // ─● ●
     }
     const hzFill = Math.max(0, bw - 2 - btnVisibleLen - 1)
     out += `\x1b[${by};${bx}H${borderColor}${tl}${hz.repeat(hzFill)}${btnSection}${hz}${tr}${RESET}`
@@ -738,6 +845,17 @@ export class DirectGridRenderer {
     if (!pane) return
     const frame = pane.directPane.buildFrame(lines)
     this.writeRaw(SYNC_START + frame + SYNC_END)
+  }
+
+  forceRedrawAll() {
+    if (!this.running) return
+    for (let i = 0; i < this.panes.length; i++) {
+      const pane = this.panes[i]!
+      resetHash(`dp_${pane.session.name}`)
+      const frame = getLatestFrame(pane.session.name)
+      if (frame) this.drawPane(i, frame.lines)
+    }
+    this.drawChrome()
   }
 
   // ─── Input ─────────────────────────────────────────────

@@ -19,6 +19,7 @@ import { app } from "./lib/state"
 import { updateAll, rebuildDisplayRows, updateUsagePanel, updateColumnHeaders } from "./ui/panels"
 import { stdinHandler } from "./input/handlers"
 import { resizeGridPanes } from "./grid/view-switch"
+import { loadSavedSession, extractSessionState, saveSessionSync } from "./data/session-store"
 
 function refreshMockSessions(projects: Project[]) {
   generateMockActiveSessions(projects)
@@ -55,6 +56,9 @@ async function main() {
   app.sortedIndices = app.projects.map((_, i) => i)
   rebuildDisplayRows()
 
+  // Load saved session for restore hint
+  app.savedSession = await loadSavedSession()
+
   // Save raw stdout.write BEFORE OpenTUI intercepts it
   app.rawStdoutWrite = process.stdout.write.bind(process.stdout) as (s: string) => boolean
 
@@ -64,6 +68,11 @@ async function main() {
     useMouse: false,
     onDestroy: () => {
       app.destroyed = true
+      // Save session state before cleanup
+      try {
+        const state = extractSessionState()
+        if (state) saveSessionSync(state)
+      } catch {}
       if (app.monitorInterval) { clearInterval(app.monitorInterval); app.monitorInterval = null }
       if (app.directGrid) app.directGrid.destroyAll()
       stopAllCaptures()

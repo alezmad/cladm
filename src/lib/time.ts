@@ -20,6 +20,15 @@ export function elapsedCompact(ms: number): string {
   return `${Math.floor(sec / 86400)}d`
 }
 
+export function timeAgoShort(ms: number): string {
+  if (!ms) return ""
+  const diff = Math.floor((Date.now() - ms) / 1000)
+  if (diff < 60) return "0m ago"
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`

@@ -1,6 +1,6 @@
 import type { CliRenderer } from "@opentui/core"
 import type { BoxRenderable, TextRenderable, ScrollBoxRenderable } from "@opentui/core"
-import type { Project, DisplayRow } from "./types"
+import type { Project, DisplayRow, SavedSession } from "./types"
 import type { DirectGridRenderer } from "../components/direct-grid"
 import type { UsageSummary } from "../data/usage"
 import type { IdleSessionInfo } from "../data/monitor"
@@ -47,6 +47,8 @@ export const app = {
   nextTabId: 1,                    // auto-increment for tab ids
   clickExpand: true,               // click-to-expand feature toggle
   lastGridTabIndex: 0,             // last active grid tab for Ctrl+Space toggle
+  savedSession: null as SavedSession | null,
+  restoreMode: null as "pending" | null,
 
   // UI refs (set during init)
   renderer: null as unknown as CliRenderer,
