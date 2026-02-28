@@ -81,6 +81,12 @@ async function main() {
     height: "100%",
   })
 
+  app.tabBarText = new TextRenderable(app.renderer, {
+    width: "100%",
+    height: 1,
+    flexShrink: 0,
+  })
+
   app.headerText = new TextRenderable(app.renderer, {
     width: "100%",
     height: 1,
@@ -148,6 +154,7 @@ async function main() {
     flexShrink: 0,
   })
 
+  app.mainBox.add(app.tabBarText)
   app.mainBox.add(app.headerText)
   app.mainBox.add(app.colHeaderText)
   app.mainBox.add(app.listBox)

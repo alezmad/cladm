@@ -67,6 +67,38 @@ export function applySortMode() {
   rebuildDisplayRows()
 }
 
+// ─── Tab bar ─────────────────────────────────────────────────────────
+
+export function updateTabBar() {
+  if (!app.tabBarText) return
+
+  // Build tab bar segments using styled text
+  const sep = dim(" │ ")
+  const pickerActive = app.viewMode === "picker"
+  const pickerTab = pickerActive ? t`${cyan("●")} ${bold("Picker")}` : t`${dim("○ Picker")}`
+
+  // Start with picker
+  let content = t`  ${pickerTab}`
+
+  // Grid tabs
+  for (const tab of app.gridTabs) {
+    const count = app.directGrid?.getTabPaneCount(tab.id) ?? 0
+    const hasIdle = app.directGrid?.hasIdleInTab(tab.id) ?? false
+    const isActive = app.viewMode === "grid" && app.directGrid?.activeTabId === tab.id
+    const label = `${tab.name} (${count})`
+    if (isActive) {
+      content = t`${content}${sep}${cyan("●")} ${bold(label)}`
+    } else if (hasIdle) {
+      content = t`${content}${sep}${yellow("◉")} ${label}`
+    } else {
+      content = t`${content}${sep}${dim("○ " + label)}`
+    }
+  }
+
+  content = t`${content}${sep}${dim("[+]")}`
+  app.tabBarText.content = content
+}
+
 // ─── Header / Footer ─────────────────────────────────────────────────
 
 export function updateHeader() {
@@ -93,7 +125,7 @@ export function updateColumnHeaders() {
 }
 
 export function updateFooter() {
-  const gridHint = app.directGrid && app.directGrid.paneCount > 0 ? " │ ^space grid" : ""
+  const gridHint = app.directGrid && app.directGrid.totalPaneCount > 0 ? " │ ^space grid" : ""
   if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0) {
     app.footerText.content = t`  ${dim(
       "↑↓ nav │ tab/shift-tab idle select │ enter focus │ i preview │ space select │ a all │ n none │ s sort │ q quit" + gridHint
@@ -327,6 +359,7 @@ function clearChildren(box: { getChildren(): { id: string }[]; remove(id: string
 
 export function updateAll() {
   if (app.destroyed) return
+  updateTabBar()
   updateHeader()
   rebuildList()
   updateBottomPanel()

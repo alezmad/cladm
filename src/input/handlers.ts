@@ -1,8 +1,8 @@
 import type { KeyEvent } from "@opentui/core"
 import { app } from "../lib/state"
-import { updateAll, rebuildDisplayRows, applySortMode } from "../ui/panels"
+import { updateAll, rebuildDisplayRows, applySortMode, updateTabBar } from "../ui/panels"
 import { extractKeyboardInput, extractMouseEvents } from "./parser"
-import { switchToGrid } from "../grid/view-switch"
+import { switchToGrid, switchToGridTab, createNewGridTab } from "../grid/view-switch"
 import { doLaunch } from "../actions/launch"
 import { launchSelections } from "../actions/launcher"
 import { loadSessions } from "../data/sessions"
@@ -136,6 +136,49 @@ export function hitTestListRow(screenRow: number): number {
   return -1
 }
 
+// ─── Tab switching helpers ───────────────────────────────────────────
+
+function handleTabSwitch(tabNumber: number) {
+  if (tabNumber === 0) {
+    // Switch to picker
+    if (app.viewMode === "grid") switchToPicker()
+    return
+  }
+  // tabNumber 1-9 → grid tab index 0-8
+  const tabIndex = tabNumber - 1
+  if (tabIndex < app.gridTabs.length) {
+    switchToGridTab(app.gridTabs[tabIndex].id)
+  }
+}
+
+function handleNextTab() {
+  if (app.gridTabs.length === 0) return
+  if (app.viewMode === "picker") {
+    switchToGridTab(app.gridTabs[0].id)
+    return
+  }
+  const currentIdx = app.gridTabs.findIndex(t => t.id === app.directGrid?.activeTabId)
+  if (currentIdx < app.gridTabs.length - 1) {
+    switchToGridTab(app.gridTabs[currentIdx + 1].id)
+  } else {
+    switchToPicker() // wrap around to picker
+  }
+}
+
+function handlePrevTab() {
+  if (app.gridTabs.length === 0) return
+  if (app.viewMode === "picker") {
+    switchToGridTab(app.gridTabs[app.gridTabs.length - 1].id)
+    return
+  }
+  const currentIdx = app.gridTabs.findIndex(t => t.id === app.directGrid?.activeTabId)
+  if (currentIdx > 0) {
+    switchToGridTab(app.gridTabs[currentIdx - 1].id)
+  } else {
+    switchToPicker() // wrap to picker
+  }
+}
+
 // ─── Picker click ────────────────────────────────────────────────────
 
 export function handlePickerClick(_col: number, screenRow: number) {
@@ -144,6 +187,39 @@ export function handlePickerClick(_col: number, screenRow: number) {
   app.cursor = idx
   toggleRowSelection(app.displayRows[idx])
   updateAll()
+}
+
+// ─── Picker tab bar click ────────────────────────────────────────────
+
+function handlePickerTabBarClick(col: number, screenRow: number) {
+  // Tab bar is at row 1 in picker (rendered as OpenTUI text)
+  if (screenRow !== 1) return false
+  // Hit test against tab bar positions (approximate, since OpenTUI renders it)
+  // We compute positions similar to the grid tab bar
+  let c = 2
+  // Picker tab
+  const pickerEnd = c + 7
+  if (col >= c && col <= pickerEnd) return false // already on picker
+  c += 11
+
+  for (const tab of app.gridTabs) {
+    const count = app.directGrid?.getTabPaneCount(tab.id) ?? 0
+    const label = `${tab.name} (${count})`
+    const visLen = 2 + label.length
+    if (col >= c && col < c + visLen) {
+      switchToGridTab(tab.id)
+      return true
+    }
+    c += visLen + 3
+  }
+
+  // [+] button
+  if (col >= c && col <= c + 2) {
+    createNewGridTab()
+    return true
+  }
+
+  return false
 }
 
 // ─── Keyboard ────────────────────────────────────────────────────────
@@ -284,10 +360,6 @@ export async function handleKeypress(key: KeyEvent) {
       app.renderer.destroy()
       return
 
-    case "t":
-      if (app.directGrid && app.directGrid.paneCount > 0) switchToGrid()
-      return
-
     default:
       return
   }
@@ -301,37 +373,82 @@ export async function handleKeypress(key: KeyEvent) {
 export async function handleGridInput(rawSequence: string): Promise<boolean> {
   if (app.viewMode !== "grid" || !app.directGrid) return false
 
-  if (rawSequence === "\x1b" && app.directGrid.isExpanded) {
-    app.directGrid.collapsePane()
+  // Esc: collapse expanded/soft-expanded, or do nothing
+  if (rawSequence === "\x1b") {
+    if (app.directGrid.isExpanded) { app.directGrid.collapsePane(); return true }
+    if (app.directGrid.isSoftExpanded) { app.directGrid.softCollapsePane(); return true }
     return true
   }
 
-  if (rawSequence === "\x1e" || rawSequence === "\x1b`" || rawSequence === "\x00") {
+  // Ctrl+Space → switch to picker
+  if (rawSequence === "\x00") {
+    app.lastGridTabIndex = app.gridTabs.findIndex(t => t.id === app.directGrid!.activeTabId)
     switchToPicker()
     return true
   }
 
+  // Ctrl+T → new tab
+  if (rawSequence === "\x14") {
+    createNewGridTab()
+    return true
+  }
+
+  // Ctrl+E → toggle click-to-expand
+  if (rawSequence === "\x05") {
+    app.clickExpand = !app.clickExpand
+    if (!app.clickExpand && app.directGrid.isSoftExpanded) app.directGrid.softCollapsePane()
+    app.directGrid.drawChrome()
+    return true
+  }
+
+  // Alt+1 through Alt+9 → switch tab
+  if (rawSequence.length === 2 && rawSequence[0] === "\x1b" && rawSequence[1] >= "1" && rawSequence[1] <= "9") {
+    handleTabSwitch(parseInt(rawSequence[1]))
+    return true
+  }
+
+  // Alt+n → next tab, Alt+p → prev tab
+  if (rawSequence === "\x1bn") { handleNextTab(); return true }
+  if (rawSequence === "\x1bp") { handlePrevTab(); return true }
+
+  // Ctrl+N / Ctrl+P → focus next/prev pane
   if (rawSequence === "\x0e") { app.directGrid.focusNext(); return true }
   if (rawSequence === "\x10") { app.directGrid.focusPrev(); return true }
 
+  // Ctrl+F → open folder
   if (rawSequence === "\x06") {
     const pane = app.directGrid.focusedPane
     if (pane) Bun.spawn(["open", pane.session.projectPath])
     return true
   }
 
+  // Ctrl+W → close pane (remove tab if last pane)
   if (rawSequence === "\x17") {
     const pane = app.directGrid.focusedPane
     if (pane) {
       if (app.directGrid.isExpanded) app.directGrid.collapsePane()
+      if (app.directGrid.isSoftExpanded) app.directGrid.softCollapsePane()
       const { killSession } = await import("../pty/session-manager")
       app.directGrid.removePane(pane.session.name)
       await killSession(pane.session.name)
-      if (app.directGrid.paneCount === 0) switchToPicker()
+      if (app.directGrid.paneCount === 0) {
+        // Remove current tab and switch to previous or picker
+        const currentTabId = app.directGrid.activeTabId
+        const tabIdx = app.gridTabs.findIndex(t => t.id === currentTabId)
+        app.directGrid.removeTab(currentTabId)
+        app.gridTabs.splice(tabIdx, 1)
+        if (app.gridTabs.length > 0) {
+          const prevIdx = Math.max(0, tabIdx - 1)
+          switchToGridTab(app.gridTabs[prevIdx].id)
+        } else {
+          switchToPicker()
+        }
+      }
     }
     return true
   }
 
+  // Page Up/Down → scroll
   if (rawSequence === "\x1b[5~") { app.directGrid.sendScrollToFocused("up"); return true }
   if (rawSequence === "\x1b[6~") { app.directGrid.sendScrollToFocused("down"); return true }
 
@@ -343,9 +460,10 @@ export async function handleGridInput(rawSequence: string): Promise<boolean> {
 
 export function switchToPicker() {
   app.viewMode = "picker"
+  app.activeTabIndex = 0
   if (app.directGrid) {
     if (app.directGrid.selectMode) app.directGrid.exitSelectMode()
-    if (app.directGrid.paneCount > 0) app.directGrid.pause()
+    if (app.directGrid.totalPaneCount > 0) app.directGrid.pause()
   }
   app.renderer.resume()
   process.stdin.removeAllListeners("data")
@@ -376,7 +494,27 @@ function processGridInput(str: string) {
       if (btn?.action === "max") dg.expandPane(btn.paneIndex)
       else if (btn?.action === "min") dg.collapsePane()
       else if (btn?.action === "sel") dg.enterSelectMode()
-      else dg.focusByClick(me.col, me.row)
+      else if (btn?.action === "tab") {
+        if (btn.tabId === -1) {
+          // Switch to picker
+          app.lastGridTabIndex = app.gridTabs.findIndex(t => t.id === dg.activeTabId)
+          switchToPicker()
+        } else if (btn.tabId !== undefined) {
+          switchToGridTab(btn.tabId)
+        }
+      }
+      else if (btn?.action === "newtab") createNewGridTab()
+      else {
+        // Pane body click
+        if (app.clickExpand && !dg.isExpanded) {
+          const clickedIdx = dg.getPaneIndexAtClick(me.col, me.row)
+          if (clickedIdx >= 0) {
+            dg.toggleSoftExpand(clickedIdx)
+          }
+        } else {
+          dg.focusByClick(me.col, me.row)
+        }
+      }
       continue
     }
   }
@@ -397,15 +535,24 @@ function processGridInput(str: string) {
 // ─── Stdin: picker mode ──────────────────────────────────────────────
 
 function processPickerInput(str: string) {
-  // Ctrl+Space → toggle to grid
-  if (str.includes("\x00") && app.directGrid && app.directGrid.paneCount > 0) {
-    switchToGrid()
-    return
+  // Ctrl+Space → toggle to last grid tab
+  if (str.includes("\x00")) {
+    if (app.directGrid && app.directGrid.totalPaneCount > 0) {
+      // Switch to last active grid tab
+      if (app.gridTabs.length > 0) {
+        const idx = Math.min(app.lastGridTabIndex, app.gridTabs.length - 1)
+        switchToGridTab(app.gridTabs[Math.max(0, idx)].id)
+      }
+      return
+    }
   }
 
   const pickerMouse = extractMouseEvents(str)
   for (const me of pickerMouse) {
-    if (me.btn === 0 && !me.release) handlePickerClick(me.col, me.row)
+    if (me.btn === 0 && !me.release) {
+      if (handlePickerTabBarClick(me.col, me.row)) continue
+      handlePickerClick(me.col, me.row)
+    }
     if (me.btn === 64) { if (app.cursor > 0) { app.cursor--; updateAll() } }
     if (me.btn === 65) { if (app.cursor < app.displayRows.length - 1) { app.cursor++; updateAll() } }
   }
@@ -413,8 +560,21 @@ function processPickerInput(str: string) {
   const keyboard = extractKeyboardInput(str)
   if (!keyboard) return
 
+  // Check for Alt+digit and Alt+n/p before normal key processing
   let ki = 0
   while (ki < keyboard.length) {
+    // Alt sequences
+    if (keyboard[ki] === "\x1b" && ki + 1 < keyboard.length) {
+      const next = keyboard[ki + 1]
+      if (next >= "1" && next <= "9") {
+        handleTabSwitch(parseInt(next))
+        ki += 2
+        continue
+      }
+      if (next === "n") { handleNextTab(); ki += 2; continue }
+      if (next === "p") { handlePrevTab(); ki += 2; continue }
+    }
+
     let matched = false
     for (let len = Math.min(8, keyboard.length - ki); len >= 1; len--) {
       const mapped = KEY_MAP[keyboard.slice(ki, ki + len)]

@@ -22,11 +22,42 @@ export function switchToGrid() {
   app.rawStdoutWrite("\x1b[?1000h")
   app.rawStdoutWrite("\x1b[?1006h")
 
-  if (isNew || app.directGrid.paneCount === 0) {
-    app.directGrid.start()
+  if (isNew || app.directGrid!.totalPaneCount === 0) {
+    app.directGrid!.start()
   } else {
-    app.directGrid.resume()
+    app.directGrid!.resume()
   }
+}
+
+export function switchToGridTab(tabId: number) {
+  const tab = app.gridTabs.find(t => t.id === tabId)
+  if (!tab) return
+
+  // Track last grid tab for Ctrl+Space toggle
+  app.lastGridTabIndex = app.gridTabs.indexOf(tab)
+
+  if (app.viewMode !== "grid") {
+    switchToGrid()
+  }
+
+  app.activeTabIndex = app.gridTabs.indexOf(tab) + 1
+  app.directGrid!.setActiveTab(tabId)
+}
+
+export function createNewGridTab(): number {
+  const tabId = app.nextTabId++
+  const tab = { id: tabId, name: `Tab ${tabId}` }
+  app.gridTabs.push(tab)
+
+  if (!app.directGrid) {
+    app.directGrid = new DirectGridRenderer(app.rawStdoutWrite)
+  }
+  app.directGrid.addTab(tab)
+
+  // Switch to the new tab
+  switchToGridTab(tabId)
+
+  return tabId
 }
 
 export function resizeGridPanes() {

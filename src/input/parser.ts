@@ -65,9 +65,9 @@ export function extractKeyboardInput(data: string): string {
         i += 3; continue
       }
 
-      // \x1b` (ctrl+backtick) — keep as keyboard shortcut
-      if (next === "`") {
-        keyboard += "\x1b`"
+      // Alt+digit (1-9) and Alt+letter (n, p) — keep as keyboard shortcuts
+      if ((next >= "1" && next <= "9") || next === "n" || next === "p") {
+        keyboard += data.slice(i, i + 2)
         i += 2; continue
       }
 

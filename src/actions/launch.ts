@@ -1,6 +1,6 @@
 import { app } from "../lib/state"
 import { updateAll, rebuildDisplayRows } from "../ui/panels"
-import { ensureGridView } from "../grid/view-switch"
+import { ensureGridView, createNewGridTab, switchToGridTab } from "../grid/view-switch"
 import { loadSessions } from "../data/sessions"
 import { createSession } from "../pty/session-manager"
 
@@ -43,11 +43,19 @@ export async function doLaunch() {
 
   if (items.length === 0) return
 
+  // Determine target tab: use active grid tab or create a new one
+  let targetTabId: number
+  if (app.viewMode === "grid" && app.directGrid && app.gridTabs.length > 0) {
+    targetTabId = app.directGrid.activeTabId
+  } else {
+    targetTabId = createNewGridTab()
+  }
+
   ensureGridView()
 
   const termW = process.stdout.columns || 120
   const termH = process.stdout.rows || 40
-  const totalPanes = items.length + (app.directGrid?.paneCount || 0)
+  const totalPanes = items.length + (app.directGrid?.getTabPaneCount(targetTabId) || 0)
   const cols = totalPanes <= 1 ? 1 : totalPanes <= 2 ? 2 : totalPanes <= 4 ? 2 : 3
   const rows = Math.ceil(totalPanes / cols)
   const paneW = Math.max(Math.floor(termW / cols) - 2, 20)
@@ -62,7 +70,7 @@ export async function doLaunch() {
       width: paneW,
       height: paneH,
     })
-    await app.directGrid!.addPane(session)
+    await app.directGrid!.addPane(session, targetTabId)
   }
 
   app.selectedProjects.clear()

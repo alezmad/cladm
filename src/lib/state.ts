@@ -7,6 +7,11 @@ import type { IdleSessionInfo } from "../data/monitor"
 
 export type ViewMode = "picker" | "grid"
 
+export interface GridTab {
+  id: number
+  name: string
+}
+
 export const app = {
   // Config
   demoMode: Bun.argv.includes("--demo"),
@@ -36,9 +41,17 @@ export const app = {
   mainBox: null as BoxRenderable | null,
   rawStdoutWrite: null as unknown as (s: string) => boolean,
 
+  // Tabs
+  activeTabIndex: 0,               // 0 = picker, 1+ = grid tab index+1
+  gridTabs: [] as GridTab[],       // grid tabs only (not picker)
+  nextTabId: 1,                    // auto-increment for tab ids
+  clickExpand: true,               // click-to-expand feature toggle
+  lastGridTabIndex: 0,             // last active grid tab for Ctrl+Space toggle
+
   // UI refs (set during init)
   renderer: null as unknown as CliRenderer,
   headerText: null as unknown as TextRenderable,
+  tabBarText: null as unknown as TextRenderable,
   colHeaderText: null as unknown as TextRenderable,
   listBox: null as unknown as ScrollBoxRenderable,
   bottomRow: null as unknown as BoxRenderable,
