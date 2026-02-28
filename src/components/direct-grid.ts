@@ -405,21 +405,24 @@ export class DirectGridRenderer {
       const bw = dp.width + 2
 
       // Top border row — framed [●] buttons
+      // Blue folder [●] is rightmost, separated by ─ from traffic lights
       if (row === by) {
+        // folder: ...─[●]─╮  → bw-5..bw-3
+        if (col >= bx + bw - 5 && col <= bx + bw - 3) return { action: "openfolder", paneIndex: i }
         if (this.isExpanded) {
-          // Layout: ...─[●] [●] [●]─╮
-          // sel: bw-5..[●]..bw-3 + trailing border
-          if (col >= bx + bw - 5 && col <= bx + bw - 1) return { action: "sel", paneIndex: i }
-          // min: bw-9..[●]..bw-7 + space
-          if (col >= bx + bw - 9 && col <= bx + bw - 6) return { action: "min", paneIndex: i }
-          // close: bw-13..[●]..bw-11 + space
-          if (col >= bx + bw - 13 && col <= bx + bw - 10) return { action: "closepane", paneIndex: i }
+          // Layout: ...─[●] [●] [●] ─[●]─╮
+          // sel: bw-10..bw-8
+          if (col >= bx + bw - 10 && col <= bx + bw - 8) return { action: "sel", paneIndex: i }
+          // min: bw-14..bw-12
+          if (col >= bx + bw - 14 && col <= bx + bw - 12) return { action: "min", paneIndex: i }
+          // close: bw-18..bw-16
+          if (col >= bx + bw - 18 && col <= bx + bw - 16) return { action: "closepane", paneIndex: i }
         } else {
-          // Layout: ...─[●] [●]─╮
-          // max: bw-5..[●]..bw-3 + trailing border
-          if (col >= bx + bw - 5 && col <= bx + bw - 1) return { action: "max", paneIndex: i }
-          // close: bw-9..[●]..bw-7 + space
-          if (col >= bx + bw - 9 && col <= bx + bw - 6) return { action: "closepane", paneIndex: i }
+          // Layout: ...─[●] [●] ─[●]─╮
+          // max: bw-10..bw-8
+          if (col >= bx + bw - 10 && col <= bx + bw - 8) return { action: "max", paneIndex: i }
+          // close: bw-14..bw-12
+          if (col >= bx + bw - 14 && col <= bx + bw - 12) return { action: "closepane", paneIndex: i }
         }
         continue
       }
@@ -427,14 +430,6 @@ export class DirectGridRenderer {
       // Title row (by+1) — click to expand/focus
       if (row === by + 1 && !this.isExpanded) {
         return { action: "max", paneIndex: i }
-      }
-
-      // Subtitle row (by+2) — folder button [▸] at right edge
-      if (row === by + 2) {
-        const folderBtnCol = bx + bw - 1 - 3 - 1 // matches render position
-        if (col >= folderBtnCol && col <= folderBtnCol + 2) {
-          return { action: "openfolder", paneIndex: i }
-        }
       }
     }
     return null
@@ -839,17 +834,19 @@ export class DirectGridRenderer {
     const GREEN_BTN = `${hexFg("#9ece6a")}[●]${RESET}`     // expand / maximize
     const DIM_BTN = `${DIM}[●]${RESET}`
 
+    const BLUE_BTN = `${hexFg("#7dcfff")}[●]${RESET}`     // open folder
+
     let btnSection: string
     let btnVisibleLen: number
     if (this.isExpanded) {
-      // Expanded: show close · minimize · select(green means select mode)
+      // Expanded: show close · minimize · select · folder
       const selBtn = this._selectMode ? `${hexFg("#9ece6a")}${BOLD}[●]${RESET}` : DIM_BTN
-      btnSection = `${borderColor}${hz}${RESET}${RED_BTN} ${YELLOW_BTN} ${selBtn}${borderColor}`
-      btnVisibleLen = 1 + 3 + 1 + 3 + 1 + 3 // ─[●] [●] [●]
+      btnSection = `${borderColor}${hz}${RESET}${RED_BTN} ${YELLOW_BTN} ${selBtn}${borderColor} ${hz}${RESET}${BLUE_BTN}${borderColor}`
+      btnVisibleLen = 1 + 3 + 1 + 3 + 1 + 3 + 1 + 1 + 3 // ─[●] [●] [●] ─[●]
     } else {
-      // Grid: show close · expand
-      btnSection = `${borderColor}${hz}${RESET}${RED_BTN} ${GREEN_BTN}${borderColor}`
-      btnVisibleLen = 1 + 3 + 1 + 3 // ─[●] [●]
+      // Grid: show close · expand · folder
+      btnSection = `${borderColor}${hz}${RESET}${RED_BTN} ${GREEN_BTN}${borderColor} ${hz}${RESET}${BLUE_BTN}${borderColor}`
+      btnVisibleLen = 1 + 3 + 1 + 3 + 1 + 1 + 3 // ─[●] [●] ─[●]
     }
     const hzFill = Math.max(0, bw - 2 - btnVisibleLen - 1)
     out += `\x1b[${by};${bx}H${borderColor}${tl}${hz.repeat(hzFill)}${btnSection}${hz}${tr}${RESET}`
@@ -872,14 +869,8 @@ export class DirectGridRenderer {
     out += `\x1b[${by + 1};${bx}H${borderColor}${vt}${RESET}\x1b[${bw - 2}X${titleContent}`
     out += `\x1b[${by + 1};${bx + bw - 1}H${borderColor}${vt}${RESET}`
 
-    // Subtitle row — path + open folder button
-    const FOLDER_BTN = `${hexFg("#7dcfff")}[▸]${RESET}`
-    const maxPathLen = bw - 2 - 1 - 1 - 3 - 1 // border - pad - space - [▸] - pad
-    const pathStr = pane.session.projectPath.length > maxPathLen
-      ? "…" + pane.session.projectPath.slice(-(maxPathLen - 1))
-      : pane.session.projectPath
-    out += `\x1b[${by + 2};${bx}H${borderColor}${vt}${RESET}\x1b[${bw - 2}X ${DIM}${pathStr}${RESET}`
-    out += `\x1b[${by + 2};${bx + bw - 1 - 3 - 1}H${FOLDER_BTN}`
+    // Subtitle row
+    out += `\x1b[${by + 2};${bx}H${borderColor}${vt}${RESET}\x1b[${bw - 2}X ${DIM}${pane.session.projectPath}${RESET}`
     out += `\x1b[${by + 2};${bx + bw - 1}H${borderColor}${vt}${RESET}`
 
     // Side borders for content rows
