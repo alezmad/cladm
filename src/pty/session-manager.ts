@@ -100,18 +100,18 @@ export function killSession(name: string): void {
 
 export function resizeSession(name: string, width: number, height: number): void {
   const session = sessions.get(name)
-  if (!session || !session.alive) return
+  if (!session || !session.alive || session.proc.killed) return
   session.width = width
   session.height = height
   // Send APC resize command: \x1b_R<rows>;<cols>\x1b\\
   const resizeCmd = `\x1b_R${height};${width}\x1b\\`
-  session.proc.stdin.write(resizeCmd)
+  try { session.proc.stdin.write(resizeCmd) } catch {}
 }
 
 export function writeToSession(name: string, data: string): void {
   const session = sessions.get(name)
-  if (!session || !session.alive) return
-  session.proc.stdin.write(data)
+  if (!session || !session.alive || session.proc.killed) return
+  try { session.proc.stdin.write(data) } catch {}
 }
 
 export function isAlive(name: string): boolean {

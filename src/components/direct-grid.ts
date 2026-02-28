@@ -3,7 +3,7 @@
 // Each pane renders independently via PTY capture push callbacks.
 
 import { DirectPane } from "./direct-pane"
-import { startCapture, stopCapture, resizeCapture, resetHash, getLatestFrame, scrollPane, getScrollOffset } from "../pty/capture"
+import { startCapture, stopCapture, resizeCapture, resetHash, getLatestFrame, getFullBuffer, scrollPane, getScrollOffset } from "../pty/capture"
 import { writeToSession, resizeSession, killSession, type PtySession } from "../pty/session-manager"
 import { app, type GridTab } from "../lib/state"
 
@@ -202,17 +202,26 @@ export class DirectGridRenderer {
     const pane = this.focusedPane
     if (!pane) return
     const termW = process.stdout.columns || 120
-    const termH = process.stdout.rows || 40
-    const frame = getLatestFrame(pane.session.name)
-    const lines = frame?.lines ?? []
-
-    let out = SYNC_START + CLEAR
-    // Header: project name + select instructions
+    const lines = getFullBuffer(pane.session.name) ?? []
     const color = getColor(pane.session.colorIndex)
-    out += `\x1b[1;1H${hexFg(color)}${BOLD}${pane.session.projectName}${RESET}  ${DIM}SELECT MODE — drag to select │ cmd+c copy │ Esc exit${RESET}`
-    // Render pane content starting at row 2, column 1 — flush left, no borders
-    for (let r = 0; r < Math.min(lines.length, termH - 2); r++) {
-      out += `\x1b[${r + 2};1H\x1b[${termW}X${lines[r]}\x1b[0m`
+
+    // Banner + all buffer lines dumped as plain text (terminal handles native scrollback)
+    let out = SYNC_START + CLEAR
+
+    // Banner row
+    const bannerBg = hexBg("#e0af68")
+    const bannerFg = "\x1b[38;2;0;0;0m"
+    const bannerText = " SELECTION MODE "
+    const hint = " Esc to exit "
+    const pad = Math.max(0, termW - bannerText.length - hint.length)
+    out += `\x1b[1;1H${bannerBg}${bannerFg}${BOLD}${bannerText}${" ".repeat(pad)}${hint}${RESET}`
+
+    // Project name on row 2
+    out += `\x1b[2;1H${hexFg(color)}${BOLD}${pane.session.projectName}${RESET}  ${DIM}drag to select │ cmd+c copy │ scroll up for history${RESET}`
+
+    // Dump full buffer starting row 3 — native terminal scrollback handles overflow
+    for (let r = 0; r < lines.length; r++) {
+      out += `\x1b[${r + 3};1H${lines[r]}\x1b[0m`
     }
     out += SYNC_END
     this.writeRaw(out)

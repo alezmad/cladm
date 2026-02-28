@@ -65,8 +65,10 @@ export function extractKeyboardInput(data: string): string {
         i += 3; continue
       }
 
-      // Alt+digit (1-9) and Alt+letter (n, p) — keep as keyboard shortcuts
-      if ((next >= "1" && next <= "9") || next === "n" || next === "p") {
+      // Alt+key combos: \x1b + printable/control char — pass through to PTY
+      // Includes Alt+Backspace (\x1b\x7f), Alt+digits, Alt+letters, etc.
+      const nc = data.charCodeAt(i + 1)
+      if ((nc >= 0x20 && nc <= 0x7e) || nc === 0x7f) {
         keyboard += data.slice(i, i + 2)
         i += 2; continue
       }

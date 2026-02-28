@@ -3,7 +3,7 @@ import { app } from "../lib/state"
 import { updateAll, rebuildDisplayRows, applySortMode, updateTabBar } from "../ui/panels"
 import { extractKeyboardInput, extractMouseEvents } from "./parser"
 import { switchToGrid, switchToGridTab, createNewGridTab } from "../grid/view-switch"
-import { doLaunch } from "../actions/launch"
+import { doLaunch, doAddPane } from "../actions/launch"
 import { launchSelections } from "../actions/launcher"
 import { loadSessions } from "../data/sessions"
 import { loadBranches } from "../data/git"
@@ -338,6 +338,27 @@ export async function handleKeypress(key: KeyEvent) {
     case "g": {
       const row = app.displayRows[app.cursor]
       const project = app.projects[row.projectIndex]
+
+      // Try grid pane navigation first
+      if (app.directGrid && app.gridTabs.length > 0) {
+        const targetSessionId = row.type === "session" && project.sessions
+          ? project.sessions[row.sessionIndex!]?.id
+          : undefined
+
+        for (const tab of app.gridTabs) {
+          const panes = app.directGrid.getTabPanes(tab.id)
+          const paneIdx = targetSessionId
+            ? panes.findIndex(p => p.session.projectPath === project.path && p.session.sessionId === targetSessionId)
+            : panes.findIndex(p => p.session.projectPath === project.path)
+          if (paneIdx >= 0) {
+            switchToGridTab(tab.id)
+            app.directGrid.setFocus(paneIdx)
+            return
+          }
+        }
+      }
+
+      // Fallback: external terminal
       if (project.activeSessions > 0) {
         const sid = row.type === "session" && project.sessions
           ? project.sessions[row.sessionIndex!]?.id
@@ -380,7 +401,18 @@ export async function handleKeypress(key: KeyEvent) {
     case "return": {
       const hasSelections = app.selectedProjects.size > 0 || app.selectedSessions.size > 0
       if (hasSelections) {
-        doLaunch()
+        if (app.addPaneTargetTabId !== null) {
+          doAddPane()
+        } else {
+          doLaunch()
+        }
+        break
+      }
+      if (app.addPaneTargetTabId !== null) {
+        // In add-pane mode with no explicit selections, add cursor item
+        const addRow = app.displayRows[app.cursor]
+        if (addRow) app.selectedProjects.set(app.projects[addRow.projectIndex].path, 1)
+        doAddPane()
         break
       }
       if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0 && app.idleCursor < app.cachedIdleSessions.length) {
@@ -444,6 +476,16 @@ export async function handleKeypress(key: KeyEvent) {
     }
 
     case "escape":
+      if (app.addPaneTargetTabId !== null) {
+        // Cancel add-pane mode, return to grid
+        const returnTabId = app.addPaneTargetTabId
+        app.addPaneTargetTabId = null
+        app.selectedProjects.clear()
+        app.selectedSessions.clear()
+        app.selectedBranches.clear()
+        switchToGridTab(returnTabId)
+        return
+      }
       if (app.restoreMode === "pending") {
         app.restoreMode = null
         break
@@ -468,7 +510,7 @@ export async function handleKeypress(key: KeyEvent) {
   }
 
   updateAll()
-  } catch {}
+  } catch (err) { console.error("[handleKeypress]", err) }
 }
 
 // ─── Grid input ──────────────────────────────────────────────────────
@@ -521,8 +563,13 @@ export async function handleGridInput(rawSequence: string): Promise<boolean> {
   if (rawSequence === "\x1bn") { handleNextTab(); return true }
   if (rawSequence === "\x1bp") { handlePrevTab(); return true }
 
-  // Ctrl+N / Ctrl+P → focus next/prev pane
-  if (rawSequence === "\x0e") { app.directGrid.focusNext(); return true }
+  // Ctrl+N → add pane to current tab (enter picker in add-pane mode)
+  if (rawSequence === "\x0e") {
+    app.addPaneTargetTabId = app.directGrid.activeTabId
+    switchToPicker()
+    return true
+  }
+  // Ctrl+P → focus prev pane
   if (rawSequence === "\x10") { app.directGrid.focusPrev(); return true }
 
   // Ctrl+F → open folder
@@ -585,6 +632,24 @@ export function switchToPicker() {
   app.renderer.requestRender()
 }
 
+// ─── Double-click detection ──────────────────────────────────────────
+
+let _lastClickTime = 0
+let _lastClickCol = 0
+let _lastClickRow = 0
+const DOUBLE_CLICK_MS = 400
+const DOUBLE_CLICK_DIST = 2
+
+function isDoubleClick(col: number, row: number): boolean {
+  const now = Date.now()
+  const dt = now - _lastClickTime
+  const dist = Math.abs(col - _lastClickCol) + Math.abs(row - _lastClickRow)
+  _lastClickTime = now
+  _lastClickCol = col
+  _lastClickRow = row
+  return dt < DOUBLE_CLICK_MS && dist <= DOUBLE_CLICK_DIST
+}
+
 // ─── Stdin: grid mode ────────────────────────────────────────────────
 
 function processGridInput(str: string) {
@@ -599,9 +664,9 @@ function processGridInput(str: string) {
   for (const me of mouseEvents) {
     if (me.btn === 64) { dg.sendScrollToFocused("up", 3); continue }
     if (me.btn === 65) { dg.sendScrollToFocused("down", 3); continue }
-    // Shift+click (btn bit 2 = shift modifier) → enter select mode for native text selection
-    if ((me.btn & 4) && !me.release) { dg.enterSelectMode(); return }
     if (me.btn === 0 && !me.release) {
+      // Double-click → enter select mode for native text selection
+      if (isDoubleClick(me.col, me.row)) { dg.enterSelectMode(); return }
       const btn = dg.checkButtonClick(me.col, me.row)
       if (btn?.action === "closetab" && btn.tabId !== undefined) {
         const result = dg.requestCloseTab(btn.tabId)

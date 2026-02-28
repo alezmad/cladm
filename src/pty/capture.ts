@@ -195,6 +195,14 @@ class VtScreen {
     }
   }
 
+  // Get full buffer: all scrollback lines + current screen (for select mode)
+  getAllLines(): string[] {
+    const lines: string[] = []
+    for (const row of this.scrollback) lines.push(this.renderRow(row))
+    for (let r = 0; r < this.height; r++) lines.push(this.renderRow(this.cells[r]))
+    return lines
+  }
+
   // Get screen as lines with embedded ANSI SGR codes (like tmux capture-pane -e)
   // When scrollOffset > 0, shows scrollback history mixed with screen content
   getLines(): string[] {
@@ -611,6 +619,12 @@ export function getLatestFrame(sessionName: string): CaptureResult | null {
     width: state.screen.width,
     height: state.screen.height,
   }
+}
+
+export function getFullBuffer(sessionName: string): string[] | null {
+  const state = panes.get(sessionName)
+  if (!state) return null
+  return state.screen.getAllLines()
 }
 
 export function stopCapture(sessionName: string): void {
