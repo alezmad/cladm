@@ -314,6 +314,7 @@ export function updateProjectSessions(projects: Project[], sessions: Map<string,
 
 const IDLE_SOUND_DELAY_MS = 10_000
 const pendingIdle = new Map<string, number>()  // path → timestamp when first went idle
+const notifiedIdle = new Set<string>()         // paths already notified — prevents re-trigger
 
 export function checkTransitions(
   projects: Project[],
@@ -325,20 +326,26 @@ export function checkTransitions(
     const prev = prevBusy.get(project.path) || 0
     const isIdle = project.busySessions === 0 && project.activeSessions > 0
 
-    if (prev > 0 && isIdle && !pendingIdle.has(project.path)) {
+    if (!isIdle) {
+      // Not idle — clear notification state so next idle transition can fire
+      notifiedIdle.delete(project.path)
+      pendingIdle.delete(project.path)
+      continue
+    }
+
+    // Already notified for this idle period — skip
+    if (notifiedIdle.has(project.path)) continue
+
+    if (prev > 0 && !pendingIdle.has(project.path)) {
       // Just transitioned busy→idle — start the delay timer
       pendingIdle.set(project.path, now)
     }
 
-    if (pendingIdle.has(project.path)) {
-      if (!isIdle) {
-        // Went busy again — false alarm, cancel
-        pendingIdle.delete(project.path)
-      } else if (now - pendingIdle.get(project.path)! >= IDLE_SOUND_DELAY_MS) {
-        // Confirmed idle for 10+ seconds
-        transitioned.push(project.name)
-        pendingIdle.delete(project.path)
-      }
+    if (pendingIdle.has(project.path) && now - pendingIdle.get(project.path)! >= IDLE_SOUND_DELAY_MS) {
+      // Confirmed idle for 10+ seconds — notify once
+      transitioned.push(project.name)
+      pendingIdle.delete(project.path)
+      notifiedIdle.add(project.path)
     }
   }
   return transitioned

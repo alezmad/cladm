@@ -753,9 +753,9 @@ export class DirectGridRenderer {
 
         // Status icon: ● green=running, ◉ yellow=idle, ○ dim=unknown
         let statusIcon: string
-        if (pane.status === "busy") statusIcon = `${hexFg("#9ece6a")}●${RESET}`
-        else if (pane.status === "idle") statusIcon = `${hexFg("#e0af68")}◉${RESET}`
-        else statusIcon = `${DIM}○${RESET}`
+        if (pane.status === "busy") statusIcon = `${hexFg("#9ece6a")}● ${RESET}`
+        else if (pane.status === "idle") statusIcon = `${hexFg("#e0af68")}◉ ${RESET}`
+        else statusIcon = `${DIM}○ ${RESET}`
 
         const startCol = col
         if (isFocused) {
@@ -763,7 +763,7 @@ export class DirectGridRenderer {
         } else {
           out += `${statusIcon}${DIM}${short}${RESET}`
         }
-        col += 1 + short.length // icon + name
+        col += 2 + short.length // icon + space + name
         this.paneListHitRegions.push({ tabId: tab.id, paneIndex: pi, startCol, endCol: col - 1 })
 
         if (pi < tabPanes.length - 1) {

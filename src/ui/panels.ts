@@ -96,9 +96,9 @@ export function updatePaneList() {
       const isFocused = app.directGrid!.activeTabId === tab.id && app.directGrid!.focusIndex === pi
 
       // Status icon: ● green=running, ◉ yellow=idle, ○ dim=unknown
-      const statusIcon = pane.status === "busy" ? green("●")
-        : pane.status === "idle" ? yellow("◉")
-        : dim("○")
+      const statusIcon = pane.status === "busy" ? green("● ")
+        : pane.status === "idle" ? yellow("◉ ")
+        : dim("○ ")
 
       if (!first) parts.push(dim(" · "))
       parts.push(statusIcon)
