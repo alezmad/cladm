@@ -11,10 +11,7 @@ import {
   NetworkIcon,
   GamepadIcon,
   BlocksIcon,
-  ArrowRightIcon,
-  ExternalLinkIcon,
   LinkedinIcon,
-  MailIcon,
   SpaceInvadersIcon,
   EyeIcon,
   BellIcon,
@@ -90,13 +87,56 @@ function FeatureBlock({
   );
 }
 
+function GridPaneMockup({
+  name,
+  status,
+  elapsed,
+  children,
+  focused,
+}: {
+  name: string;
+  status: "busy" | "idle";
+  elapsed?: string;
+  children: React.ReactNode;
+  focused?: boolean;
+}) {
+  return (
+    <div className={`bg-bg border ${focused ? "border-accent" : "border-border"}`}>
+      {/* Pane title bar */}
+      <div className="flex items-center justify-between px-3 py-1 border-b border-border bg-surface-2/60">
+        <div className="font-[family-name:var(--font-mono)] text-[10px] flex items-center gap-1.5">
+          {status === "busy" ? (
+            <span className="text-green">●</span>
+          ) : (
+            <>
+              <span className="text-yellow">◉</span>
+              {elapsed && <span className="text-dim">{elapsed}</span>}
+            </>
+          )}
+          <span className="text-text">{name}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-cyan text-[8px]">●</span>
+          <span className="text-dim text-[8px]">─</span>
+          <span className="text-[#27c93f] text-[8px]">●</span>
+          <span className="text-[#ff5f56] text-[8px]">●</span>
+        </div>
+      </div>
+      {/* Pane content */}
+      <div className="p-3 font-[family-name:var(--font-mono)] text-[10px] text-dim leading-relaxed">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-bg selection:bg-accent/30">
       <SubscribeModal />
+
       {/* ══════ HERO ══════ */}
       <section className="relative overflow-hidden scanlines">
-        {/* Grid background */}
         <div
           className="absolute inset-0 opacity-[0.04]"
           style={{
@@ -142,14 +182,13 @@ export default function Home() {
               </h1>
 
               <p className="font-[family-name:var(--font-pixel)] text-accent text-lg md:text-xl mb-5">
-                MULTI-PROJECT CLAUDE CODE MONITOR
+                CLAUDE CODE COMMAND CENTER
               </p>
 
               <p className="font-[family-name:var(--font-mono)] text-dim text-sm max-w-md leading-relaxed mb-8">
-                Track all your Claude Code sessions in one place. See
-                busy/idle status in real time, monitor usage costs, get
-                notified when Claude finishes, and launch everything in
-                parallel Terminal windows.
+                Manage all your Claude Code sessions from one terminal.
+                An embedded PTY grid with tabbed workspaces, pane controls,
+                real-time status tracking, and full keyboard-driven workflow.
               </p>
 
               {/* Install command */}
@@ -169,7 +208,7 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Right — terminal cascade */}
+            {/* Right — terminal cascade: picker → grid */}
             <div className="flex-1 w-full max-w-xl">
               <TerminalCascade />
             </div>
@@ -186,50 +225,185 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ══════ DEMO GIF ══════ */}
+      {/* ══════ THE WORKSPACE ══════ */}
       <section className="max-w-5xl mx-auto px-6 py-20">
-        <div className="text-center mb-10">
+        <div className="text-center mb-4">
           <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-3">
-            // SEE IT IN ACTION
+            // THE WORKSPACE
           </h2>
+          <p className="font-[family-name:var(--font-mono)] text-dim text-xs max-w-2xl mx-auto leading-relaxed">
+            Every Claude Code session runs in an embedded terminal pane — no separate windows.
+            See all your projects at once, switch focus with a click, and never lose track of what Claude is doing.
+          </p>
         </div>
 
-        <TerminalWindow title="cladm">
-          <Image
-            src="/demo.gif"
-            alt="cladm demo showing project navigation"
-            width={980}
-            height={500}
-            className="w-full"
-            unoptimized
-          />
-        </TerminalWindow>
+        {/* Grid workspace mockup */}
+        <div className="mt-10">
+          <div className="pixel-border bg-surface overflow-hidden">
+            {/* Tab bar */}
+            <div className="flex items-center bg-surface-2 border-b-2 border-border">
+              <div className="px-4 py-2 border-b-2 border-accent font-[family-name:var(--font-mono)] text-xs">
+                <span className="text-green">●</span>
+                <span className="text-text"> acme-api</span>
+                <span className="text-dim"> · </span>
+                <span className="text-yellow">◉</span>
+                <span className="text-text"> quantum-dash</span>
+              </div>
+              <div className="px-4 py-2 font-[family-name:var(--font-mono)] text-xs text-dim border-b-2 border-transparent">
+                <span className="text-green">●</span>
+                <span> ml-pipeline</span>
+                <span className="text-dim"> · </span>
+                <span className="text-green">●</span>
+                <span> infra-k8s</span>
+              </div>
+              <div className="ml-auto px-3 py-2 font-[family-name:var(--font-mono)] text-[10px] text-dim">
+                <span className="text-accent">+</span> add pane
+              </div>
+            </div>
+
+            {/* Pane grid */}
+            <div className="grid grid-cols-2 gap-[2px] p-[2px]">
+              {/* Pane 1: acme-api */}
+              <GridPaneMockup name="acme-api" status="busy" focused>
+                <div className="text-green mb-1">&gt; I&apos;ll analyze the authentication module and</div>
+                <div className="text-green">{"  "}fix the token refresh bug you mentioned.</div>
+                <div className="mt-2">
+                  <span className="text-accent">⏺</span> Reading src/auth/token.ts
+                </div>
+                <div>
+                  <span className="text-accent">⏺</span> Reading src/auth/middleware.ts
+                </div>
+                <div>
+                  <span className="text-accent">⏺</span> Grep: refreshToken pattern
+                </div>
+                <div className="text-green mt-1">
+                  Found 3 files with stale token logic.
+                  <span className="cursor-blink text-accent">_</span>
+                </div>
+              </GridPaneMockup>
+
+              {/* Pane 2: quantum-dash */}
+              <GridPaneMockup name="quantum-dash" status="idle" elapsed="4m">
+                <div className="text-text">I&apos;ve updated the chart component to use</div>
+                <div className="text-text">the new streaming data format. Changes:</div>
+                <div className="mt-2">
+                  <span className="text-green">✓</span> src/components/chart.tsx
+                </div>
+                <div>
+                  <span className="text-green">✓</span> src/hooks/useChartData.ts
+                </div>
+                <div>
+                  <span className="text-green">✓</span> src/types/stream.d.ts
+                </div>
+                <div className="mt-2 text-yellow">Waiting for your input...</div>
+              </GridPaneMockup>
+
+              {/* Pane 3: ml-pipeline */}
+              <GridPaneMockup name="ml-pipeline" status="busy">
+                <div className="text-green">&gt; Building the BERT fine-tuning pipeline</div>
+                <div className="text-green">{"  "}with the new training dataset.</div>
+                <div className="mt-2">
+                  <span className="text-accent">⏺</span> Writing src/train.py
+                </div>
+                <div className="mt-1">
+                  Processing: epoch 3/10{" "}
+                  <span className="text-accent">████████</span>
+                  <span className="text-border">░░░░░░░░░░░░</span>{" "}
+                  <span className="text-text">30%</span>
+                </div>
+              </GridPaneMockup>
+
+              {/* Pane 4: infra-k8s */}
+              <GridPaneMockup name="infra-k8s" status="busy">
+                <div className="text-green">&gt; Updating the Kubernetes deployment</div>
+                <div className="text-green">{"  "}manifests for staging.</div>
+                <div className="mt-2">
+                  <span className="text-accent">⏺</span> Reading k8s/staging/deployment.yaml
+                </div>
+                <div>
+                  <span className="text-accent">⏺</span> Reading k8s/staging/service.yaml
+                </div>
+                <div className="mt-1 text-green">
+                  Scaling replicas 2 → 4 for load test
+                  <span className="cursor-blink text-accent">_</span>
+                </div>
+              </GridPaneMockup>
+            </div>
+          </div>
+        </div>
+
+        {/* Feature callouts */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">
+          <div className="text-center">
+            <div className="font-[family-name:var(--font-pixel)] text-accent text-xs uppercase tracking-wider mb-2">
+              Embedded PTY Grid
+            </div>
+            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] leading-relaxed">
+              Each pane runs a real pseudo-terminal via forkpty(). Full I/O, ANSI colors, resize — no tmux needed.
+            </p>
+          </div>
+          <div className="text-center">
+            <div className="font-[family-name:var(--font-pixel)] text-accent text-xs uppercase tracking-wider mb-2">
+              Tabbed Workspaces
+            </div>
+            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] leading-relaxed">
+              Group sessions into tabs. Inline pane names with status icons show what&apos;s running at a glance.
+            </p>
+          </div>
+          <div className="text-center">
+            <div className="font-[family-name:var(--font-pixel)] text-accent text-xs uppercase tracking-wider mb-2">
+              Pane Controls
+            </div>
+            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] leading-relaxed">
+              Traffic-light buttons on every pane: close, expand, minimize, plus a folder-open button. Fully mouse-driven.
+            </p>
+          </div>
+        </div>
       </section>
 
       <PixelDivider />
 
-      {/* ══════ SCREENSHOTS ══════ */}
+      {/* ══════ SMART PICKER ══════ */}
       <section className="max-w-5xl mx-auto px-6 py-16">
-        <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-12 text-center">
-          // SCREENSHOTS
-        </h2>
+        <div className="text-center mb-4">
+          <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-3">
+            // THE SMART PICKER
+          </h2>
+          <p className="font-[family-name:var(--font-mono)] text-dim text-xs max-w-2xl mx-auto leading-relaxed">
+            It starts with a smart project picker. cladm reads{" "}
+            <code className="text-accent">~/.claude/history.jsonl</code> to discover every project
+            you&apos;ve used with Claude Code — git branch, sync status, dirty state, session history, stack detection — all loaded in parallel.
+            Select what you need, hit Enter, and the grid workspace takes over.
+          </p>
+        </div>
 
-        <div className="space-y-16">
-          {/* Main view */}
+        <div className="mt-8">
+          <TerminalWindow title="cladm — 8 projects">
+            <Image
+              src="/demo.gif"
+              alt="cladm smart picker showing project navigation and selection"
+              width={980}
+              height={500}
+              className="w-full"
+              unoptimized
+            />
+          </TerminalWindow>
+        </div>
+
+        {/* Picker screenshots */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-12">
           <div>
-            <div className="flex items-center gap-4 mb-4">
+            <div className="flex items-center gap-4 mb-3">
               <div className="h-[2px] flex-1 bg-border" />
               <h3 className="font-[family-name:var(--font-pixel)] text-text text-xs uppercase tracking-wider whitespace-nowrap">
                 PROJECT LIST
               </h3>
               <div className="h-[2px] flex-1 bg-border" />
             </div>
-            <p className="font-[family-name:var(--font-mono)] text-dim text-xs text-center mb-6">
-              All your projects sorted by recent Claude usage. Git branch, sync
-              status, dirty state, session count, and auto-detected stack at a
-              glance.
+            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] text-center mb-4">
+              Sorted by recent Claude usage. Git metadata, session count, and stack tags at a glance.
             </p>
-            <TerminalWindow title="cladm — 8 projects">
+            <TerminalWindow title="cladm — project list">
               <Image
                 src="/screenshot-main.png"
                 alt="cladm main project list view"
@@ -240,25 +414,21 @@ export default function Home() {
             </TerminalWindow>
           </div>
 
-          {/* Expanded view */}
           <div>
-            <div className="flex items-center gap-4 mb-4">
+            <div className="flex items-center gap-4 mb-3">
               <div className="h-[2px] flex-1 bg-border" />
               <h3 className="font-[family-name:var(--font-pixel)] text-text text-xs uppercase tracking-wider whitespace-nowrap">
                 EXPANDED VIEW
               </h3>
               <div className="h-[2px] flex-1 bg-border" />
             </div>
-            <p className="font-[family-name:var(--font-mono)] text-dim text-xs text-center mb-6">
-              Press <Keycap>&rarr;</Keycap> to expand. Browse branches, see
-              session conversations with last prompt and Claude&apos;s response.
-              Running sessions show <span className="text-green">● running</span> or{" "}
-              <span className="text-yellow">◉ idle</span> status inline. Resume any session directly.
+            <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] text-center mb-4">
+              Browse branches, past sessions with conversation previews. Resume any session directly.
             </p>
-            <TerminalWindow title="cladm — 2 selected (1 branch switch)">
+            <TerminalWindow title="cladm — expanded">
               <Image
                 src="/screenshot-expanded.png"
-                alt="cladm expanded view with sessions and branches"
+                alt="cladm expanded view with sessions"
                 width={980}
                 height={600}
                 className="w-full"
@@ -273,104 +443,83 @@ export default function Home() {
       {/* ══════ LIVE MONITORING ══════ */}
       <section className="max-w-5xl mx-auto px-6 py-16">
         <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-12 text-center">
-          // LIVE SESSION MONITORING
+          // REAL-TIME STATUS
         </h2>
 
-        <div className="max-w-2xl mx-auto">
-          <div className="pixel-border bg-surface p-6">
-            <p className="font-[family-name:var(--font-mono)] text-dim text-xs leading-relaxed mb-5">
-              cladm detects all running Claude Code sessions across every project and shows their real-time status.
-              When any session finishes, a sound plays and the dock icon bounces — so you never miss it, even across dozens of parallel sessions.
-            </p>
-
-            <div className="space-y-3 font-[family-name:var(--font-mono)] text-xs">
-              <div className="flex items-center gap-3">
-                <span className="text-green text-base">●</span>
-                <span className="text-text">Busy</span>
-                <span className="text-dim">— Claude is actively processing</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-yellow text-base">◉</span>
-                <span className="text-dim">3m</span>
-                <span className="text-text">Idle</span>
-                <span className="text-dim">— Claude finished 3 min ago, waiting for input</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-dim text-base">○</span>
-                <span className="text-text ml-[22px]">No session</span>
-                <span className="text-dim">— No active Claude process</span>
-              </div>
-            </div>
-
-            <div className="mt-5 pt-4 border-t border-border">
-              <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] leading-relaxed">
-                Detection reads the tail of each session&apos;s JSONL in{" "}
-                <code className="text-accent">~/.claude/projects/</code>. A session is
-                busy if the file was written recently OR the last assistant message
-                has a pending tool call. This prevents false idle triggers during
-                long-running tools and subtasks.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <PixelDivider />
-
-      {/* ══════ USAGE + IDLE PANELS ══════ */}
-      <section className="max-w-5xl mx-auto px-6 py-16">
-        <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-12 text-center">
-          // USAGE & IDLE PANELS
-        </h2>
-
-        <div className="space-y-12 max-w-4xl mx-auto">
-          {/* Usage panel screenshot */}
-          <div>
-            <div className="flex items-center gap-4 mb-4">
-              <div className="h-[2px] flex-1 bg-border" />
-              <h3 className="font-[family-name:var(--font-pixel)] text-text text-xs uppercase tracking-wider whitespace-nowrap">
-                USAGE TRACKING
+        <div className="max-w-3xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Status indicators */}
+            <div className="pixel-border bg-surface p-6">
+              <h3 className="font-[family-name:var(--font-pixel)] text-text text-xs uppercase tracking-wider mb-4">
+                Session Status
               </h3>
-              <div className="h-[2px] flex-1 bg-border" />
+              <div className="space-y-3 font-[family-name:var(--font-mono)] text-xs">
+                <div className="flex items-center gap-3">
+                  <span className="text-green text-base">●</span>
+                  <span className="text-text">Busy</span>
+                  <span className="text-dim">— Claude is actively working</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-yellow text-base">◉</span>
+                  <span className="text-dim">3m</span>
+                  <span className="text-text">Idle</span>
+                  <span className="text-dim">— waiting for your input</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-dim text-base">○</span>
+                  <span className="text-text ml-[22px]">No session</span>
+                  <span className="text-dim">— not running</span>
+                </div>
+              </div>
+              <div className="mt-4 pt-3 border-t border-border">
+                <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] leading-relaxed">
+                  Status visible in both picker rows and grid pane headers.
+                  Sound + dock bounce on idle transitions.
+                </p>
+              </div>
             </div>
-            <p className="font-[family-name:var(--font-mono)] text-dim text-xs text-center mb-6">
-              Press <Keycap>u</Keycap> to toggle. Tracks session (5h window), weekly
-              all-model and sonnet-only costs against configurable plan limits, plus monthly totals.
-            </p>
-            <TerminalWindow title="cladm — usage panel">
-              <Image
-                src="/screenshot-usage.png"
-                alt="cladm usage tracking panel with session, weekly, and monthly cost bars"
-                width={980}
-                height={500}
-                className="w-full"
-              />
-            </TerminalWindow>
-          </div>
 
-          {/* Idle sessions screenshot */}
-          <div>
-            <div className="flex items-center gap-4 mb-4">
-              <div className="h-[2px] flex-1 bg-border" />
-              <h3 className="font-[family-name:var(--font-pixel)] text-text text-xs uppercase tracking-wider whitespace-nowrap">
-                IDLE SESSIONS
+            {/* Usage tracking */}
+            <div className="pixel-border bg-surface p-6">
+              <h3 className="font-[family-name:var(--font-pixel)] text-text text-xs uppercase tracking-wider mb-4">
+                Usage Tracking
               </h3>
-              <div className="h-[2px] flex-1 bg-border" />
+              <div className="space-y-3 font-[family-name:var(--font-mono)] text-[10px]">
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-dim">session (5h)</span>
+                    <span className="text-text">$2.40 / $5.00</span>
+                  </div>
+                  <div className="h-2 bg-bg border border-border">
+                    <div className="h-full bg-accent" style={{ width: "48%" }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-dim">weekly all-model</span>
+                    <span className="text-text">$18.50 / $100</span>
+                  </div>
+                  <div className="h-2 bg-bg border border-border">
+                    <div className="h-full bg-green" style={{ width: "18.5%" }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-dim">monthly total</span>
+                    <span className="text-text">$67.20</span>
+                  </div>
+                  <div className="h-2 bg-bg border border-border">
+                    <div className="h-full bg-cyan" style={{ width: "33.6%" }} />
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 pt-3 border-t border-border">
+                <p className="font-[family-name:var(--font-mono)] text-dim text-[10px] leading-relaxed">
+                  Press <Keycap>u</Keycap> in picker mode. Tracks session, weekly,
+                  and monthly costs against configurable plan limits.
+                </p>
+              </div>
             </div>
-            <p className="font-[family-name:var(--font-mono)] text-dim text-xs text-center mb-6">
-              Press <Keycap>i</Keycap> to toggle. Shows sessions waiting for your
-              input, sorted by most recently idle. Press Enter to focus a session&apos;s
-              Terminal tab directly.
-            </p>
-            <TerminalWindow title="cladm — idle sessions (2)">
-              <Image
-                src="/screenshot-idle.png"
-                alt="cladm idle sessions panel showing waiting sessions with elapsed time"
-                width={980}
-                height={500}
-                className="w-full"
-              />
-            </TerminalWindow>
           </div>
         </div>
       </section>
@@ -385,14 +534,34 @@ export default function Home() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <FeatureBlock
+            icon={<TerminalIcon size={28} />}
+            title="EMBEDDED GRID"
+            desc="Run multiple Claude Code sessions side by side in a tiled terminal grid. Each pane is a real PTY with full I/O — no separate windows needed."
+          />
+          <FeatureBlock
+            icon={<BlocksIcon size={28} />}
+            title="TABBED WORKSPACES"
+            desc="Group sessions into named tabs. Inline pane indicators show project names and busy/idle status at a glance."
+          />
+          <FeatureBlock
+            icon={<GamepadIcon size={28} />}
+            title="PANE CONTROLS"
+            desc="Traffic-light buttons on every pane: close, minimize, expand to full screen. Blue button opens the project folder."
+          />
+          <FeatureBlock
+            icon={<SearchIcon size={28} />}
+            title="SELECT MODE"
+            desc="Double-click any pane to enter select mode. Copy text from the full scrollback buffer — up to 5,000 lines of history."
+          />
+          <FeatureBlock
             icon={<EyeIcon size={28} />}
             title="LIVE MONITORING"
-            desc="Track all Claude sessions across every project. Busy/idle status updates in real time with elapsed timers."
+            desc="Track busy/idle status across all sessions in real time. Elapsed timers show how long each session has been waiting."
           />
           <FeatureBlock
             icon={<TrendingUpIcon size={28} />}
             title="USAGE TRACKING"
-            desc="Session, weekly, and monthly cost bars. Track all-model and sonnet-only usage against configurable plan limits."
+            desc="Session, weekly, and monthly cost bars against configurable plan limits. Track all-model and sonnet-only usage."
           />
           <FeatureBlock
             icon={<BellIcon size={28} />}
@@ -400,65 +569,48 @@ export default function Home() {
             desc="Sound + dock bounce when any session finishes. Never miss a completed task across dozens of parallel sessions."
           />
           <FeatureBlock
-            icon={<ThunderIcon size={28} />}
-            title="FOCUS SESSION"
-            desc="Press Enter on any idle session to instantly focus its Terminal tab. Flash animation highlights the window."
-          />
-          <FeatureBlock
-            icon={<SearchIcon size={28} />}
-            title="AUTO-DISCOVERY"
-            desc="Reads ~/.claude/history.jsonl to find every project you've used with Claude Code. No config needed."
-          />
-          <FeatureBlock
-            icon={<NetworkIcon size={28} />}
-            title="GIT METADATA"
-            desc="Branch, sync status (ahead/behind), last commit, dirty state — all loaded in parallel per project."
-          />
-          <FeatureBlock
             icon={<FolderIcon size={28} />}
-            title="SESSION BROWSER"
-            desc="Expand any project to browse past sessions. See conversation previews and resume directly."
+            title="AUTO-DISCOVERY"
+            desc="Reads ~/.claude/history.jsonl to find every project. Git branch, sync status, dirty state — all loaded in parallel."
           />
           <FeatureBlock
-            icon={<TerminalIcon size={28} />}
-            title="PARALLEL LAUNCH"
-            desc="Select multiple projects and hit Enter. Each opens in a new Terminal.app window simultaneously."
-          />
-          <FeatureBlock
-            icon={<BlocksIcon size={28} />}
-            title="STACK DETECTION"
-            desc="Auto-detects project stack: TypeScript, Python, Rust, Go, Docker, and more from config files."
+            icon={<ThunderIcon size={28} />}
+            title="DIRECT PTY"
+            desc="Native pseudo-terminal management via forkpty(). No tmux dependency. Zero configuration. Just works."
           />
         </div>
       </section>
 
       <PixelDivider />
 
-      {/* ══════ KEYBINDINGS ══════ */}
+      {/* ══════ CONTROLS ══════ */}
       <section className="max-w-5xl mx-auto px-6 py-16">
         <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-12 text-center">
           // CONTROLS
         </h2>
 
-        <div className="max-w-2xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+          {/* Picker mode */}
           <div className="pixel-border bg-surface p-6">
-            <div className="grid grid-cols-2 gap-y-3 font-[family-name:var(--font-mono)] text-xs">
+            <h3 className="font-[family-name:var(--font-pixel)] text-accent text-xs uppercase tracking-wider mb-4 text-center">
+              Picker Mode
+            </h3>
+            <div className="grid grid-cols-2 gap-y-2 font-[family-name:var(--font-mono)] text-xs">
               {[
                 ["↑ ↓", "Navigate"],
-                ["Space", "Toggle selection"],
+                ["Space", "Toggle select"],
                 ["→", "Expand project"],
                 ["←", "Collapse"],
-                ["Enter", "Launch selected / focus session"],
-                ["i", "Toggle idle sessions panel"],
-                ["u", "Toggle usage panel"],
-                ["/", "Filter projects"],
+                ["Enter", "Launch grid"],
+                ["/", "Filter"],
                 ["a", "Select all"],
                 ["n", "Deselect all"],
-                ["s", "Cycle sort mode"],
-                ["f", "Open folder in Finder"],
-                ["g", "Go to active session"],
-                ["PgUp PgDn", "Jump 15 rows"],
-                ["q / Esc", "Quit"],
+                ["s", "Cycle sort"],
+                ["u", "Usage panel"],
+                ["i", "Idle sessions"],
+                ["f", "Open folder"],
+                ["g", "Go to session"],
+                ["q", "Quit"],
               ].map(([key, desc]) => (
                 <div key={key} className="contents">
                   <div className="text-accent">{key}</div>
@@ -467,12 +619,58 @@ export default function Home() {
               ))}
             </div>
           </div>
+
+          {/* Grid mode */}
+          <div className="pixel-border bg-surface p-6">
+            <h3 className="font-[family-name:var(--font-pixel)] text-accent text-xs uppercase tracking-wider mb-4 text-center">
+              Grid Mode
+            </h3>
+            <div className="grid grid-cols-2 gap-y-2 font-[family-name:var(--font-mono)] text-xs">
+              {[
+                ["Click", "Focus pane"],
+                ["Dbl-click", "Select mode"],
+                ["Alt+1-9", "Switch tab"],
+                ["Alt+n/p", "Next/prev tab"],
+                ["+ button", "Add pane"],
+                ["Esc", "Back to picker"],
+              ].map(([key, desc]) => (
+                <div key={key} className="contents">
+                  <div className="text-accent">{key}</div>
+                  <div className="text-dim">{desc}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-border">
+              <div className="font-[family-name:var(--font-pixel)] text-text text-[10px] uppercase tracking-wider mb-2">
+                Pane Buttons
+              </div>
+              <div className="grid grid-cols-2 gap-y-2 font-[family-name:var(--font-mono)] text-xs">
+                {[
+                  ["● blue", "Open folder"],
+                  ["● green", "Expand pane"],
+                  ["● yellow", "Minimize"],
+                  ["● red", "Close pane"],
+                ].map(([key, desc], i) => (
+                  <div key={key} className="contents">
+                    <div className={
+                      i === 0 ? "text-cyan" :
+                      i === 1 ? "text-[#27c93f]" :
+                      i === 2 ? "text-yellow" :
+                      "text-[#ff5f56]"
+                    }>{key}</div>
+                    <div className="text-dim">{desc}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
       <PixelDivider />
 
-      {/* ══════ INSTALL ══════ */}
+      {/* ══════ QUICK START ══════ */}
       <section className="max-w-5xl mx-auto px-6 py-16">
         <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-12 text-center">
           // QUICK START
@@ -514,87 +712,9 @@ export default function Home() {
 
           <div className="mt-6 text-center">
             <p className="font-[family-name:var(--font-mono)] text-dim text-xs">
-              Or try with mock data:{" "}
+              Try with mock data:{" "}
               <code className="text-yellow">cladm --demo</code>
             </p>
-          </div>
-        </div>
-      </section>
-
-      {/* ══════ LAUNCH RESULT ══════ */}
-      <section className="max-w-5xl mx-auto px-6 py-16">
-        <h2 className="font-[family-name:var(--font-pixel)] text-accent text-sm uppercase tracking-[0.3em] mb-4 text-center">
-          // HIT ENTER
-        </h2>
-        <p className="font-[family-name:var(--font-mono)] text-dim text-xs text-center mb-10 max-w-lg mx-auto">
-          Select your projects, press Enter, and watch them all launch in
-          parallel. Each project opens a fresh Claude Code session in its own
-          Terminal window.
-        </p>
-
-        <div className="flex flex-col md:flex-row items-center gap-6">
-          {/* Mini cladm picker */}
-          <div className="flex-1 w-full">
-            <TerminalWindow title="cladm — 3 selected">
-              <div className="p-3 font-[family-name:var(--font-mono)] text-[10px] leading-relaxed">
-                <div className="text-dim mb-1">
-                  {"     PROJECT              BRANCH   LAST USE"}
-                </div>
-                <div className="bg-[#283457] px-1">
-                  <span className="text-green">●</span>
-                  <span className="text-green"> [✓]</span>
-                  <span className="text-text">
-                    {" "}
-                    acme-api{"             "}
-                  </span>
-                  <span className="text-magenta">main</span>
-                  <span className="text-cyan">{"     "}25m ago</span>
-                </div>
-                <div className="px-1">
-                  <span className="text-yellow">◉</span>
-                  <span className="text-dim">2m</span>
-                  <span className="text-green">[✓]</span>
-                  <span className="text-text"> quantum-dashboard{"    "}</span>
-                  <span className="text-magenta">feat/cha</span>
-                  <span className="text-cyan">{"  "}1h ago</span>
-                </div>
-                <div className="px-1">
-                  <span className="text-green">●</span>
-                  <span className="text-green"> [✓]</span>
-                  <span className="text-text"> ml-pipeline{"          "}</span>
-                  <span className="text-magenta">exp/bert</span>
-                  <span className="text-cyan">{" "}just now</span>
-                </div>
-                <div className="px-1">
-                  <span className="text-dim">○</span>
-                  <span className="text-dim"> [ ]</span>
-                  <span className="text-dim"> pixel-engine{"          "}develop{"  "}3h ago</span>
-                </div>
-              </div>
-            </TerminalWindow>
-          </div>
-
-          {/* Arrow */}
-          <div className="font-[family-name:var(--font-pixel)] text-accent text-2xl flex-shrink-0 rotate-90 md:rotate-0">
-            &gt;&gt;&gt;
-          </div>
-
-          {/* Claude Code terminals */}
-          <div className="flex-1 w-full">
-            <div className="relative">
-              {/* Stacked terminal windows effect */}
-              <div className="absolute top-3 left-3 right-[-3px] bottom-[-3px] border-2 border-border bg-surface-2 opacity-40" />
-              <div className="absolute top-[6px] left-[6px] right-[-6px] bottom-[-6px] border-2 border-border bg-surface-2 opacity-20" />
-              <TerminalWindow title="claude — acme-api">
-                <Image
-                  src="/claude-terminal.webp"
-                  alt="Claude Code session launched in Terminal"
-                  width={960}
-                  height={518}
-                  className="w-full"
-                />
-              </TerminalWindow>
-            </div>
           </div>
         </div>
       </section>
@@ -665,7 +785,7 @@ export default function Home() {
             </div>
           </div>
           <div className="mt-6 font-[family-name:var(--font-mono)] text-dim text-[10px] text-center">
-            Built with Bun + OpenTUI. Pixel art by the cladm creatures.
+            Built with Bun + OpenTUI. Direct PTY grid, no tmux. Pixel art by the cladm creatures.
           </div>
         </div>
       </footer>

@@ -14,9 +14,9 @@ const pixel = Silkscreen({
 });
 
 export const metadata: Metadata = {
-  title: "cladm — Monitor & launch Claude Code sessions",
+  title: "cladm — Claude Code Command Center",
   description:
-    "Multi-project Claude Code session monitor. Track busy/idle status in real time, see usage costs, get notified when Claude finishes, and launch everything in parallel.",
+    "Multiproject workspace for Claude Code. Embedded terminal grid with tabbed workspaces, pane controls, real-time status tracking, usage monitoring, and full keyboard-driven workflow.",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "32x32" },
@@ -26,8 +26,8 @@ export const metadata: Metadata = {
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "cladm",
-    description: "Monitor & launch Claude Code sessions across all your projects",
+    title: "cladm — Claude Code Command Center",
+    description: "Manage all your Claude Code sessions from one terminal. Embedded PTY grid, tabbed workspaces, live monitoring, and pane controls.",
     url: "https://claudm.com",
     siteName: "cladm",
     type: "website",
@@ -36,14 +36,14 @@ export const metadata: Metadata = {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: "cladm — Monitor & launch Claude Code sessions",
+        alt: "cladm — Claude Code Command Center",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "cladm",
-    description: "Monitor & launch Claude Code sessions across all your projects",
+    title: "cladm — Claude Code Command Center",
+    description: "Manage all your Claude Code sessions from one terminal. Embedded PTY grid, tabbed workspaces, live monitoring, and pane controls.",
     images: ["/og-image.png"],
   },
 };
