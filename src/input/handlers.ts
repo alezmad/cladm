@@ -306,7 +306,7 @@ export async function handleGridInput(rawSequence: string): Promise<boolean> {
     return true
   }
 
-  if (rawSequence === "\x1e" || rawSequence === "\x1b`") {
+  if (rawSequence === "\x1e" || rawSequence === "\x1b`" || rawSequence === "\x00") {
     switchToPicker()
     return true
   }
@@ -397,6 +397,12 @@ function processGridInput(str: string) {
 // ─── Stdin: picker mode ──────────────────────────────────────────────
 
 function processPickerInput(str: string) {
+  // Ctrl+Space → toggle to grid
+  if (str.includes("\x00") && app.directGrid && app.directGrid.paneCount > 0) {
+    switchToGrid()
+    return
+  }
+
   const pickerMouse = extractMouseEvents(str)
   for (const me of pickerMouse) {
     if (me.btn === 0 && !me.release) handlePickerClick(me.col, me.row)

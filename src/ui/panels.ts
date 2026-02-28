@@ -93,7 +93,7 @@ export function updateColumnHeaders() {
 }
 
 export function updateFooter() {
-  const gridHint = app.directGrid && app.directGrid.paneCount > 0 ? " │ t grid" : ""
+  const gridHint = app.directGrid && app.directGrid.paneCount > 0 ? " │ ^space grid" : ""
   if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0) {
     app.footerText.content = t`  ${dim(
       "↑↓ nav │ tab/shift-tab idle select │ enter focus │ i preview │ space select │ a all │ n none │ s sort │ q quit" + gridHint
