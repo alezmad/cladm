@@ -1,0 +1,321 @@
+import {
+  Box,
+  Text,
+  t,
+  bold,
+  dim,
+  fg,
+  green,
+  yellow,
+  cyan,
+  magenta,
+} from "@opentui/core"
+import { app } from "../lib/state"
+import { CURSOR_BG, ACTIVE_BG, ACCENT, DIM_CLR } from "../lib/theme"
+import { getSessionStatus, getIdleSessions } from "../data/monitor"
+import { getUsageSummary, formatCost, formatWindow, makeBar, pct, PLAN_LIMITS } from "../data/usage"
+import { timeAgo, formatSize, elapsedCompact } from "../lib/time"
+import { fmtProjectRow, fmtSessionRow, fmtNewSessionRow, fmtBranchRow, fmtSyncIndicator } from "./formatters"
+
+export function rebuildDisplayRows() {
+  app.displayRows = []
+  for (const idx of app.sortedIndices) {
+    const project = app.projects[idx]
+    app.displayRows.push({ type: "project", projectIndex: idx })
+    if (project.expanded) {
+      if (project.branches) {
+        for (const br of project.branches) {
+          if (!br.isCurrent) {
+            app.displayRows.push({ type: "branch", projectIndex: idx, branchName: br.name })
+          }
+        }
+      }
+      if (project.sessions) {
+        for (let si = 0; si < project.sessions.length; si++) {
+          app.displayRows.push({ type: "session", projectIndex: idx, sessionIndex: si })
+        }
+      }
+      app.displayRows.push({ type: "new-session", projectIndex: idx })
+    }
+  }
+}
+
+export function applySortMode() {
+  const indices = Array.from(app.projects.keys())
+  switch (app.sortMode) {
+    case 0:
+      app.sortedIndices = indices
+      break
+    case 1:
+      app.sortedIndices = indices.sort((a, b) =>
+        app.projects[a].name.localeCompare(app.projects[b].name)
+      )
+      break
+    case 2:
+      app.sortedIndices = indices.sort(
+        (a, b) => (app.projects[b].commitEpoch || 0) - (app.projects[a].commitEpoch || 0)
+      )
+      break
+    case 3:
+      app.sortedIndices = indices.sort(
+        (a, b) => app.projects[b].sessionCount - app.projects[a].sessionCount
+      )
+      break
+  }
+  rebuildDisplayRows()
+}
+
+export function updateHeader() {
+  const total = app.selectedProjects.size + app.selectedSessions.size
+  const branchNote = app.selectedBranches.size > 0 ? ` (${app.selectedBranches.size} branch switch)` : ""
+  const modeLabel = app.demoMode ? " [DEMO]" : ""
+  const activeCount = app.projects.reduce((sum, p) => sum + (p.activeSessions > 0 ? 1 : 0), 0)
+  const busyCount = app.projects.reduce((sum, p) => sum + (p.busySessions > 0 ? 1 : 0), 0)
+  const idleCount = activeCount - busyCount
+  if (activeCount > 0) {
+    app.headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${branchNote}   ${dim(
+      `sort: ${app.sortLabels[app.sortMode]} │ ${app.projects.length} projects`
+    )} │ ${green(`${busyCount} busy`)} ${yellow(`${idleCount} idle`)}`
+  } else {
+    app.headerText.content = t`  ${bold("cladm")}${yellow(modeLabel)} — ${String(total)} selected${branchNote}   ${dim(
+      `sort: ${app.sortLabels[app.sortMode]} │ ${app.projects.length} projects`
+    )}`
+  }
+}
+
+export function updateColumnHeaders() {
+  const cols = `    ${"PROJECT".padEnd(30)} ${"BRANCH".padEnd(9)}${"SYNC".padEnd(5)}${"COMMIT".padEnd(10)}${"MESSAGE".padEnd(22)}${"DIRTY".padEnd(9)}${"LAST USE".padEnd(9)}${"SES".padStart(3)} ${"MSGS".padStart(5)} STACK`
+  app.colHeaderText.content = t`  ${dim(cols)}`
+}
+
+function addIdleRow(s: { idleSinceMs: number; projectName: string; sessionTitle: string; lastPrompt: string; lastResponse: string }, isCursor: boolean) {
+  const elapsed = (elapsedCompact(s.idleSinceMs) || "<5s").padEnd(6)
+  const name = s.projectName.length > 20 ? s.projectName.slice(0, 17) + "..." : s.projectName
+  const title = s.sessionTitle.length > 50 ? s.sessionTitle.slice(0, 47) + "..." : s.sessionTitle
+  const prompt = s.lastPrompt
+    ? s.lastPrompt.length > 60 ? s.lastPrompt.slice(0, 57) + "..." : s.lastPrompt
+    : "(no text)"
+  const response = s.lastResponse
+    ? s.lastResponse.length > 60 ? s.lastResponse.slice(0, 57) + "..." : s.lastResponse
+    : "(no response)"
+  const pointer = isCursor ? "▸" : " "
+  app.previewBox.add(Text({ content: t`  ${yellow("◉")} ${isCursor ? cyan(pointer) : dim(pointer)} ${dim(elapsed)}${bold(name)}  ${fg(ACCENT)('"' + title + '"')}`, width: "100%", height: 1 }))
+  app.previewBox.add(Text({ content: t`       ${dim("│")}  ${dim("You:")} ${fg(ACCENT)('"' + prompt + '"')}`, width: "100%", height: 1 }))
+  app.previewBox.add(Text({ content: t`       ${dim("│")}  ${dim("Claude:")} ${fg(ACCENT)('"' + response + '"')}`, width: "100%", height: 1 }))
+}
+
+export function updateIdlePanel() {
+  app.cachedIdleSessions = getIdleSessions(app.projects)
+  const n = app.cachedIdleSessions.length
+  app.previewBox.title = ` Idle Sessions (${n}) — enter to focus `
+  for (const child of app.previewBox.getChildren()) app.previewBox.remove(child.id)
+  if (n === 0) {
+    app.idleCursor = 0
+    app.previewBox.add(Text({ content: t`${dim("  No idle sessions")}`, width: "100%", height: 1 }))
+    return
+  }
+  if (app.idleCursor >= n) app.idleCursor = n - 1
+  const show = app.cachedIdleSessions.slice(0, 3)
+  for (let i = 0; i < show.length; i++) {
+    addIdleRow(show[i], app.idleCursor === i)
+  }
+  if (n > 3) {
+    app.previewBox.add(Text({ content: t`    ${dim(`+${n - 3} more`)}`, width: "100%", height: 1 }))
+  }
+}
+
+export function updateBottomPanel() {
+  if (app.bottomPanelMode === "idle") {
+    app.bottomRow.height = 14
+    updateIdlePanel()
+  } else {
+    for (const child of app.previewBox.getChildren()) app.previewBox.remove(child.id)
+    app.previewBox.add(app.previewText)
+    app.bottomRow.height = 10
+    app.previewBox.title = " Preview "
+    updatePreview()
+  }
+}
+
+function usageBarColor(p: number) {
+  return p >= 80 ? yellow : p >= 50 ? cyan : green
+}
+
+export function updateUsagePanel() {
+  if (app.destroyed) return
+  for (const child of app.usageBox.getChildren()) app.usageBox.remove(child.id)
+
+  if (!app.cachedUsage) {
+    app.usageBox.title = " Usage "
+    app.usageBox.add(Text({ content: t`${dim("Loading...")}`, width: "100%", height: 1 }))
+    return
+  }
+
+  const u = app.cachedUsage
+  const BAR_W = 18
+
+  const sPct = pct(u.totalCost, PLAN_LIMITS.session)
+  const sBar = makeBar(u.totalCost, PLAN_LIMITS.session, BAR_W)
+  const sReset = u.sessionResetMs > 0 ? formatWindow(u.sessionResetMs) : ""
+  app.usageBox.title = " Usage "
+  app.usageBox.add(Text({ content: t`${bold("Session")}`, width: "100%", height: 1 }))
+  app.usageBox.add(Text({ content: t`${usageBarColor(sPct)(sBar)} ${bold(String(sPct) + "%")}`, width: "100%", height: 1 }))
+  app.usageBox.add(Text({ content: t`${dim(sReset ? "resets " + sReset : "")} ${dim(formatCost(u.costPerHour) + "/h")}`, width: "100%", height: 1 }))
+
+  const wPct = pct(u.weekTotal, PLAN_LIMITS.weeklyAll)
+  const wBar = makeBar(u.weekTotal, PLAN_LIMITS.weeklyAll, BAR_W)
+  app.usageBox.add(Text({ content: t`${bold("All models")} ${dim(formatCost(u.weekTotal))}`, width: "100%", height: 1 }))
+  app.usageBox.add(Text({ content: t`${usageBarColor(wPct)(wBar)} ${bold(String(wPct) + "%")}`, width: "100%", height: 1 }))
+
+  const snPct = pct(u.weeklySonnetCost, PLAN_LIMITS.weeklySonnet)
+  const snBar = makeBar(u.weeklySonnetCost, PLAN_LIMITS.weeklySonnet, BAR_W)
+  app.usageBox.add(Text({ content: t`${bold("Sonnet")} ${dim(formatCost(u.weeklySonnetCost))}`, width: "100%", height: 1 }))
+  app.usageBox.add(Text({ content: t`${usageBarColor(snPct)(snBar)} ${bold(String(snPct) + "%")}`, width: "100%", height: 1 }))
+
+  const monthLabel = new Date().toLocaleString("en", { month: "short" })
+  app.usageBox.add(Text({ content: t`${bold(monthLabel + " total")} ${dim(formatCost(u.monthlyTotalCost))}`, width: "100%", height: 1 }))
+  app.usageBox.add(Text({ content: t`${dim(formatCost(u.costPerHour) + "/h avg · " + u.totalRequests + " reqs")}`, width: "100%", height: 1 }))
+
+  app.renderer.requestRender()
+}
+
+export function updateFooter() {
+  if (app.bottomPanelMode === "idle" && app.cachedIdleSessions.length > 0) {
+    app.footerText.content = t`  ${dim(
+      "↑↓ nav │ tab/shift-tab idle select │ enter focus │ i preview │ space select │ a all │ n none │ s sort │ q quit"
+    )}`
+  } else {
+    app.footerText.content = t`  ${dim(
+      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter grid │ o external │ q quit"
+    )}`
+  }
+}
+
+export function updatePreview() {
+  if (app.cursor >= app.displayRows.length) {
+    app.previewText.content = t`${dim("  No selection")}`
+    return
+  }
+
+  const row = app.displayRows[app.cursor]
+  const project = app.projects[row.projectIndex]
+
+  if (row.type === "project") {
+    app.previewText.content = t`  ${bold(project.name)}  ${dim(project.path)}
+  ${dim("Branch:")} ${magenta(project.branch)}  ${dim("Commit:")} ${
+      project.commitAge || "-"
+    } — ${project.commitMsg || "-"}
+  ${dim("Status:")} ${project.dirty ? yellow(project.dirty) : green("clean")}  ${dim(
+      "Sessions:"
+    )} ${String(project.sessionCount)}  ${dim("Msgs:")} ${String(project.totalMessages)}  ${dim(
+      "Stack:"
+    )} ${project.tags || "-"}`
+  } else if (row.type === "session" && project.sessions) {
+    const s = project.sessions[row.sessionIndex!]
+    const sStatus = getSessionStatus(project.path, s.id)
+    const sLabel = sStatus === "busy" ? green(" ● running") : sStatus === "idle" ? yellow(" ◉ idle") : ""
+    app.previewText.content = t`  ${bold("Session:")} ${s.title}${sLabel}
+  ${dim(timeAgo(s.timestamp))} · ${dim(formatSize(s.sizeBytes))} · ${magenta(s.branch || "-")}
+  ${dim("Last prompt:")} ${s.lastUserPrompt || dim("(no text)")}
+  ${dim("Claude:")} ${s.lastAssistantMsg || dim("(no text response)")}`
+  } else if (row.type === "branch" && project.branches) {
+    const br = project.branches.find(b => b.name === row.branchName)
+    if (br) {
+      const sync = fmtSyncIndicator(br.ahead, br.behind)
+      const selBranch = app.selectedBranches.get(project.path)
+      const selNote = selBranch === br.name
+        ? t`  ${green("Selected")} — will launch with: ${dim(`-p "switch to branch ${br.name}, stash if needed"`)}`
+        : t`  ${dim("Press space to select this branch for launch")}`
+      app.previewText.content = t`  ${bold("Branch:")} ${magenta(br.name)}  ${dim("Sync:")} ${sync}
+  ${dim("Last commit:")} ${br.lastCommitAge} — ${br.lastCommitMsg}
+${selNote}`
+    }
+  } else {
+    app.previewText.content = t`  ${green("Start a new Claude session")} in ${bold(project.name)}
+  ${dim(project.path)}`
+  }
+}
+
+export function rebuildList() {
+  for (const child of app.listBox.getChildren()) {
+    app.listBox.remove(child.id)
+  }
+
+  for (let i = 0; i < app.displayRows.length; i++) {
+    const row = app.displayRows[i]
+    const isCursor = i === app.cursor
+    const project = app.projects[row.projectIndex]
+
+    let content: ReturnType<typeof t>
+    let rowHeight = 1
+    if (row.type === "project") {
+      const isSel = app.selectedProjects.has(project.path)
+      content = fmtProjectRow(project, isSel)
+    } else if (row.type === "session") {
+      const session = project.sessions![row.sessionIndex!]
+      const isSel = app.selectedSessions.has(session.id)
+      content = fmtSessionRow(row.projectIndex, row.sessionIndex!, isSel, false)
+      rowHeight = 3
+    } else if (row.type === "branch") {
+      const isSel = app.selectedBranches.get(project.path) === row.branchName
+      content = fmtBranchRow(row.projectIndex, row.branchName!, isSel)
+    } else {
+      const isSel = app.selectedProjects.has(project.path)
+      content = fmtNewSessionRow(row.projectIndex, isSel)
+    }
+
+    const isActiveProject = row.type === "project" && project.activeSessions > 0
+    const isActiveSession = row.type === "session" && getSessionStatus(project.path, project.sessions![row.sessionIndex!].id) !== null
+    const bgColor = isCursor ? CURSOR_BG : (isActiveProject || isActiveSession) ? ACTIVE_BG : undefined
+
+    if (bgColor) {
+      app.listBox.add(
+        Box(
+          {
+            backgroundColor: bgColor,
+            shouldFill: true,
+            width: "100%",
+            height: rowHeight,
+          },
+          Text({ content })
+        )
+      )
+    } else {
+      app.listBox.add(Text({ content, width: "100%", height: rowHeight }))
+    }
+  }
+
+  ensureCursorVisible()
+  app.renderer.requestRender()
+}
+
+export function ensureCursorVisible() {
+  const vpH = app.listBox.viewport.height
+  if (vpH <= 0) return
+
+  let cursorY = 0
+  let cursorH = 1
+  for (let i = 0; i < app.displayRows.length; i++) {
+    const h = app.displayRows[i].type === "session" ? 3 : 1
+    if (i === app.cursor) {
+      cursorH = h
+      break
+    }
+    cursorY += h
+  }
+
+  const top = app.listBox.scrollTop
+  if (cursorY < top) {
+    app.listBox.scrollTo(cursorY)
+  } else if (cursorY + cursorH > top + vpH) {
+    app.listBox.scrollTo(cursorY + cursorH - vpH)
+  }
+}
+
+export function updateAll() {
+  if (app.destroyed) return
+  updateHeader()
+  rebuildList()
+  updateBottomPanel()
+  updateFooter()
+}
