@@ -64,8 +64,8 @@ export async function loadGitMetadata(project: Project): Promise<void> {
 
   if (syncResult.status === "fulfilled") {
     const parts = syncResult.value.split("\t")
-    project.ahead = parseInt(parts[0]) || 0
-    project.behind = parseInt(parts[1]) || 0
+    project.ahead = parseInt(parts[0] ?? "0") || 0
+    project.behind = parseInt(parts[1] ?? "0") || 0
   } else {
     project.ahead = -1
     project.behind = -1
@@ -95,9 +95,9 @@ export async function loadBranches(projectPath: string): Promise<BranchInfo[]> {
     const parts = line.split("|")
     if (parts.length < 4) continue
 
-    const name = parts[0]
+    const name = parts[0]!
     const isCurrent = parts[1] === "*"
-    const epoch = parseInt(parts[2]) || 0
+    const epoch = parseInt(parts[2] ?? "0") || 0
     const subject = parts.slice(3).join("|")
     const lastCommitAge = timeAgo(epoch * 1000)
     const lastCommitMsg = subject.length > 40 ? subject.slice(0, 37) + "..." : subject
@@ -113,8 +113,8 @@ export async function loadBranches(projectPath: string): Promise<BranchInfo[]> {
         `${name}...${name}@{upstream}`,
       )
       const syncParts = syncOut.split("\t")
-      ahead = parseInt(syncParts[0]) || 0
-      behind = parseInt(syncParts[1]) || 0
+      ahead = parseInt(syncParts[0] ?? "0") || 0
+      behind = parseInt(syncParts[1] ?? "0") || 0
     } catch {
       ahead = -1
       behind = -1

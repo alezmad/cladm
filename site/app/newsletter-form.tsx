@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 "use client";
 
 import { useState } from "react";
@@ -17,7 +18,7 @@ export function NewsletterForm({ project = "cladm" }: { project?: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), project }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as { ok?: boolean; error?: string };
       if (data.ok) {
         setStatus("ok");
         setMsg("subscribed");

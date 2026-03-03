@@ -24,7 +24,7 @@ import { fmtProjectRow, fmtSessionRow, fmtNewSessionRow, fmtBranchRow, fmtSyncIn
 export function rebuildDisplayRows() {
   app.displayRows = []
   for (const idx of app.sortedIndices) {
-    const project = app.projects[idx]
+    const project = app.projects[idx]!
     app.displayRows.push({ type: "project", projectIndex: idx })
     if (project.expanded) {
       if (project.branches) {
@@ -52,17 +52,17 @@ export function applySortMode() {
       break
     case 1:
       app.sortedIndices = indices.sort((a, b) =>
-        app.projects[a].name.localeCompare(app.projects[b].name)
+        app.projects[a]!.name.localeCompare(app.projects[b]!.name)
       )
       break
     case 2:
       app.sortedIndices = indices.sort(
-        (a, b) => (app.projects[b].commitEpoch || 0) - (app.projects[a].commitEpoch || 0)
+        (a, b) => (app.projects[b]!.commitEpoch || 0) - (app.projects[a]!.commitEpoch || 0)
       )
       break
     case 3:
       app.sortedIndices = indices.sort(
-        (a, b) => app.projects[b].sessionCount - app.projects[a].sessionCount
+        (a, b) => app.projects[b]!.sessionCount - app.projects[a]!.sessionCount
       )
       break
   }
@@ -79,7 +79,18 @@ const PANE_COLORS = [
 export function updatePaneList() {
   if (!app.paneListText) return
   if (!app.directGrid || app.gridTabs.length === 0) {
-    app.paneListText.content = ""
+    // Show restore banner if saved session exists
+    if (app.savedSession && app.restoreMode !== "pending") {
+      const ago = timeAgoShort(app.savedSession.savedAt)
+      const paneCount = app.savedSession.tabs.reduce((sum, t) => sum + t.panes.length, 0)
+      const names = app.savedSession.tabs.flatMap(t => t.panes.map(p => p.projectName))
+      const nameList = names.length <= 4 ? names.join(", ") : names.slice(0, 3).join(", ") + ` +${names.length - 3}`
+      app.paneListText.content = t`  ${yellow("⟳")} ${bold("Last session")} ${dim(`(${paneCount} panes, ${ago})`)}: ${dim(nameList)}  ${yellow("r")}${dim(" to restore")}`
+    } else if (app.restoreMode === "pending") {
+      app.paneListText.content = t`  ${yellow("⟳")} ${bold("Restore session?")}  ${yellow("r")}${dim(" resume")} │ ${yellow("R")}${dim(" fresh")} │ ${dim("esc cancel")}`
+    } else {
+      app.paneListText.content = ""
+    }
     return
   }
 
@@ -221,7 +232,7 @@ export function updateFooter() {
     )}`
   } else {
     app.footerText.content = t`  ${dim(
-      "↑↓ nav │ space select │ → expand │ ← collapse │ f folder │ g go to │ i idle │ a all │ n none │ s sort │ enter grid │ o external │ q quit" + gridHint + restoreHint
+      "↑↓ nav │ space select │ del unselect │ → expand │ ← collapse │ f folder │ g go to │ c claude │ i idle │ a all │ n none │ s sort │ enter grid │ o external │ q quit" + gridHint + restoreHint
     )}`
   }
 }
@@ -257,7 +268,7 @@ function updateIdlePanel() {
   if (app.idleCursor >= n) app.idleCursor = n - 1
   const show = app.cachedIdleSessions.slice(0, 3)
   for (let i = 0; i < show.length; i++) {
-    addIdleRow(show[i], app.idleCursor === i)
+    addIdleRow(show[i]!, app.idleCursor === i)
   }
   if (n > 3) {
     app.previewBox.add(Text({ content: t`    ${dim(`+${n - 3} more`)}`, width: "100%", height: 1 }))
@@ -329,8 +340,8 @@ export function updatePreview() {
     return
   }
 
-  const row = app.displayRows[app.cursor]
-  const project = app.projects[row.projectIndex]
+  const row = app.displayRows[app.cursor]!
+  const project = app.projects[row.projectIndex]!
 
   if (row.type === "project") {
     app.previewText.content = t`  ${bold(project.name)}  ${dim(project.path)}
@@ -343,7 +354,7 @@ export function updatePreview() {
       "Stack:"
     )} ${project.tags || "-"}`
   } else if (row.type === "session" && project.sessions) {
-    const s = project.sessions[row.sessionIndex!]
+    const s = project.sessions[row.sessionIndex!]!
     const sStatus = getSessionStatus(project.path, s.id)
     const sLabel = sStatus === "busy" ? green(" ● running") : sStatus === "idle" ? yellow(" ◉ idle") : ""
     app.previewText.content = t`  ${bold("Session:")} ${s.title}${sLabel}
@@ -375,15 +386,15 @@ export function updatePreview() {
 let rowRenderableIds: string[] = []
 
 function renderRowContent(i: number) {
-  const row = app.displayRows[i]
-  const project = app.projects[row.projectIndex]
+  const row = app.displayRows[i]!
+  const project = app.projects[row.projectIndex]!
 
   let content: ReturnType<typeof t>
   let rowHeight = 1
   if (row.type === "project") {
     content = fmtProjectRow(project, app.selectedProjects.get(project.path))
   } else if (row.type === "session") {
-    content = fmtSessionRow(row.projectIndex, row.sessionIndex!, app.selectedSessions.has(project.sessions![row.sessionIndex!].id), false)
+    content = fmtSessionRow(row.projectIndex, row.sessionIndex!, app.selectedSessions.has(project.sessions![row.sessionIndex!]!.id), false)
     rowHeight = 3
   } else if (row.type === "branch") {
     content = fmtBranchRow(row.projectIndex, row.branchName!, app.selectedBranches.get(project.path) === row.branchName)
@@ -393,7 +404,7 @@ function renderRowContent(i: number) {
 
   const isCursor = i === app.cursor
   const isActiveProject = row.type === "project" && project.activeSessions > 0
-  const isActiveSession = row.type === "session" && getSessionStatus(project.path, project.sessions![row.sessionIndex!].id) !== null
+  const isActiveSession = row.type === "session" && getSessionStatus(project.path, project.sessions![row.sessionIndex!]!.id) !== null
   const bgColor = isCursor ? CURSOR_BG : (isActiveProject || isActiveSession) ? ACTIVE_BG : undefined
 
   if (bgColor) {
@@ -423,7 +434,7 @@ export function ensureCursorVisible() {
   let cursorY = 0
   let cursorH = 1
   for (let i = 0; i < app.displayRows.length; i++) {
-    const h = app.displayRows[i].type === "session" ? 3 : 1
+    const h = app.displayRows[i]!.type === "session" ? 3 : 1
     if (i === app.cursor) {
       cursorH = h
       break

@@ -68,7 +68,7 @@ async function extractSessionInfo(
     for (let i = tailLines.length - 1; i >= 0; i--) {
       if (lastUserPrompt && lastAssistantMsg) break
       const line = tailLines[i]
-      if (!line.trim()) continue
+      if (!line?.trim()) continue
       try {
         const d = JSON.parse(line)
         if (d.timestamp) {

@@ -86,7 +86,7 @@ function modelLabel(model: string): string {
 }
 
 function calcCost(normalized: string, tokens: TokenUsage): number {
-  const p = PRICING[normalized] || PRICING["sonnet"]
+  const p = PRICING[normalized] ?? PRICING["sonnet"]!
   return (
     (tokens.input / 1_000_000) * p.input +
     (tokens.output / 1_000_000) * p.output +
@@ -157,7 +157,7 @@ function dateKey(ts: number): string {
 }
 
 function dayLabel(ts: number): string {
-  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(ts).getDay()]
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(ts).getDay()] ?? "?"
 }
 
 export async function getUsageSummary(): Promise<UsageSummary> {

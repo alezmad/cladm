@@ -50,7 +50,7 @@ export function extractKeyboardInput(data: string): string {
             i = Math.min(j + 4, data.length); continue
           }
           // ONLY keep: arrows (A-D), Home (H), End (F), shift-tab (Z), function keys (~)
-          if ("ABCDHFZ~".includes(final)) {
+          if ("ABCDHFZ~".includes(final!)) {
             keyboard += data.slice(i, j + 1)
           }
           i = j + 1; continue
@@ -92,9 +92,9 @@ export function extractMouseEvents(data: string): { btn: number, col: number, ro
   let m
   while ((m = re.exec(data)) !== null) {
     events.push({
-      btn: parseInt(m[1]),
-      col: parseInt(m[2]),
-      row: parseInt(m[3]),
+      btn: parseInt(m[1]!),
+      col: parseInt(m[2]!),
+      row: parseInt(m[3]!),
       release: m[4] === "m",
       start: m.index,
       end: m.index + m[0].length,

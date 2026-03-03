@@ -18,7 +18,7 @@ interface PaneState {
   session: PtySession
   screen: VtScreen
   callbacks: Set<FrameCallback>
-  reader: ReadableStreamDefaultReader<Uint8Array> | null
+  reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | null
   running: boolean
 }
 
@@ -66,7 +66,7 @@ class VtScreen {
     const newCells = this.makeGrid(width, height)
     for (let r = 0; r < Math.min(height, this.height); r++) {
       for (let c = 0; c < Math.min(width, this.width); c++) {
-        newCells[r][c] = this.cells[r]?.[c] ?? { char: " ", sgr: "" }
+        newCells[r]![c] = this.cells[r]?.[c] ?? { char: " ", sgr: "" }
       }
     }
     this.cells = newCells
@@ -188,7 +188,7 @@ class VtScreen {
 
       const row = this.cells[this.cursorY]
       if (row && this.cursorX < this.width) {
-        row[this.cursorX] = { char: data[i], sgr: this.currentSgr }
+        row[this.cursorX] = { char: data[i]!, sgr: this.currentSgr }
       }
       this.cursorX++
       i++
@@ -199,7 +199,7 @@ class VtScreen {
   getAllLines(): string[] {
     const lines: string[] = []
     for (const row of this.scrollback) lines.push(this.renderRow(row))
-    for (let r = 0; r < this.height; r++) lines.push(this.renderRow(this.cells[r]))
+    for (let r = 0; r < this.height; r++) lines.push(this.renderRow(this.cells[r]!))
     return lines
   }
 
@@ -221,16 +221,16 @@ class VtScreen {
           lines.push("")
           continue
         } else if (srcRow < sbLen) {
-          row = this.scrollback[srcRow]
+          row = this.scrollback[srcRow]!
         } else {
-          row = this.cells[srcRow - sbLen]
+          row = this.cells[srcRow - sbLen]!
         }
         lines.push(this.renderRow(row))
       }
     } else {
       // Live view: just render current screen
       for (let r = 0; r < this.height; r++) {
-        lines.push(this.renderRow(this.cells[r]))
+        lines.push(this.renderRow(this.cells[r]!))
       }
     }
 
@@ -244,7 +244,7 @@ class VtScreen {
     let trailingSpaces = 0
 
     for (let c = 0; c < this.width && c < row.length; c++) {
-      const cell = row[c]
+      const cell = row[c]!
       if (cell.sgr !== lastSgr) {
         if (trailingSpaces > 0) {
           line += " ".repeat(trailingSpaces)
@@ -277,13 +277,13 @@ class VtScreen {
 
     // Check for private mode prefix (?, >, =)
     if (i < data.length && (data[i] === "?" || data[i] === ">" || data[i] === "=")) {
-      privateMode = data[i]
+      privateMode = data[i]!
       i++
     }
 
     // Parse parameters
     while (i < data.length) {
-      const ch = data[i]
+      const ch = data[i]!
       if (ch >= "0" && ch <= "9") {
         num += ch; i++
       } else if (ch === ";") {
@@ -569,7 +569,7 @@ export function startCapture(session: PtySession): void {
 
   // Start reading stdout from pty-helper
   if (session.proc.stdout) {
-    const reader = session.proc.stdout.getReader()
+    const reader = session.proc.stdout.getReader() as ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>
     state.reader = reader
     const decoder = new TextDecoder()
 
@@ -678,6 +678,41 @@ export function getScrollOffset(sessionName: string): number {
   return state?.screen.scrollOffset ?? 0
 }
 
+export interface ScrollInfo {
+  offset: number
+  scrollbackLength: number
+  screenHeight: number
+}
+
+export function getScrollInfo(sessionName: string): ScrollInfo | null {
+  const state = panes.get(sessionName)
+  if (!state) return null
+  return {
+    offset: state.screen.scrollOffset,
+    scrollbackLength: state.screen.scrollback.length,
+    screenHeight: state.screen.height,
+  }
+}
+
+export function scrollToOffset(sessionName: string, offset: number): void {
+  const state = panes.get(sessionName)
+  if (!state) return
+  const screen = state.screen
+  const maxOffset = screen.scrollback.length
+  screen.scrollOffset = Math.max(0, Math.min(offset, maxOffset))
+
+  const frame: CaptureResult = {
+    lines: screen.getLines(),
+    cursorX: screen.cursorX,
+    cursorY: screen.cursorY,
+    width: screen.width,
+    height: screen.height,
+  }
+  for (const cb of state.callbacks) {
+    try { cb(frame) } catch {}
+  }
+}
+
 export function stopAllCaptures(): void {
   for (const [name] of panes) stopCapture(name)
 }
@@ -688,7 +723,7 @@ const lastHashes = new Map<string, number>()
 export function hasChanged(lines: string[], key = "_default"): boolean {
   let h = 5381
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
+    const line = lines[i]!
     for (let j = 0; j < line.length; j++) {
       h = ((h << 5) + h + line.charCodeAt(j)) | 0
     }

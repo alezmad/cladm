@@ -7,11 +7,14 @@ import {
   yellow,
   cyan,
   magenta,
+  type TextChunk,
+  type StylableInput,
 } from "@opentui/core"
 import { app } from "../lib/state"
 import { ACCENT } from "../lib/theme"
 import { getSessionStatus } from "../data/monitor"
 import { timeAgo, formatSize, elapsedCompact } from "../lib/time"
+import { st } from "../lib/styled"
 
 export function fmtSyncIndicator(ahead: number, behind: number): string {
   if (ahead === -1 && behind === -1) return "✗"
@@ -34,42 +37,42 @@ export const TAB_COLORS = [
   (s: string) => fg("#b4f9f8")(s),  // 9
 ]
 
-function getGridTabBadges(projectPath: string): string {
-  if (!app.directGrid || app.gridTabs.length === 0) return ""
-  const badges: string[] = []
+function getGridTabBadgeChunks(projectPath: string): TextChunk[] {
+  if (!app.directGrid || app.gridTabs.length === 0) return []
+  const chunks: TextChunk[] = []
   for (const tab of app.gridTabs) {
     const panes = app.directGrid.getTabPanes(tab.id)
     if (panes.some(p => p.session.projectPath === projectPath)) {
       const displayIdx = app.gridTabs.indexOf(tab) + 1
       const color = TAB_COLORS[(displayIdx - 1) % TAB_COLORS.length]!
-      badges.push(color(`T${displayIdx}`))
+      chunks.push(color(`T${displayIdx}`))
     }
   }
-  return badges.length > 0 ? badges.join("") + " " : ""
+  return chunks
 }
 
-function getSessionGridTabBadge(projectPath: string, sessionId: string): string {
-  if (!app.directGrid || app.gridTabs.length === 0) return ""
+function getSessionGridTabBadgeChunks(projectPath: string, sessionId: string): TextChunk[] {
+  if (!app.directGrid || app.gridTabs.length === 0) return []
   for (const tab of app.gridTabs) {
     const panes = app.directGrid.getTabPanes(tab.id)
     if (panes.some(p => p.session.projectPath === projectPath && p.session.sessionId === sessionId)) {
       const displayIdx = app.gridTabs.indexOf(tab) + 1
       const color = TAB_COLORS[(displayIdx - 1) % TAB_COLORS.length]!
-      return " " + color(`T${displayIdx}`)
+      return [{ __isChunk: true, text: " ", attributes: 0 } as TextChunk, color(`T${displayIdx}`)]
     }
   }
-  return ""
+  return []
 }
 
-function fmtTabCheck(tabNum: number | undefined) {
+function fmtTabCheck(tabNum: number | undefined): StylableInput {
   if (tabNum === undefined) return " "
   const color = TAB_COLORS[(tabNum - 1) % TAB_COLORS.length]!
   return color(String(tabNum))
 }
 
 export function fmtProjectRow(project: import("../lib/types").Project, isSelected: number | undefined) {
-  let activeDot: string
-  let activeTag: string
+  let activeDot: StylableInput
+  let activeTag: StylableInput
   if (project.activeSessions > 0) {
     if (project.busySessions > 0) {
       activeDot = green("●")
@@ -110,12 +113,17 @@ export function fmtProjectRow(project: import("../lib/types").Project, isSelecte
   else if (ca.includes("d ago")) claudeCol = green(ca.padEnd(9))
   else claudeCol = dim(ca.padEnd(9))
 
-  const gridBadge = getGridTabBadges(project.path)
-  return t` ${activeDot}${activeTag}${gridBadge}[${check}] ${dim(arrow)} ${name.padEnd(28)} ${magenta(branch.padEnd(9))}${syncCol}${dim(
-    (project.commitAge || "-").padEnd(10)
-  )}${(project.commitMsg || "-").padEnd(22)}${dirtyCol}${claudeCol}${dim(
-    String(project.sessionCount).padStart(3)
-  )} ${dim(String(project.totalMessages).padStart(5))} ${dim(project.tags)}`
+  const badgeChunks = getGridTabBadgeChunks(project.path)
+  return st(
+    t` ${activeDot}${activeTag}`,
+    ...badgeChunks,
+    ...(badgeChunks.length > 0 ? [" "] : []),
+    t`[${check}] ${dim(arrow)} ${name.padEnd(28)} ${magenta(branch.padEnd(9))}${syncCol}${dim(
+      (project.commitAge || "-").padEnd(10)
+    )}${(project.commitMsg || "-").padEnd(22)}${dirtyCol}${claudeCol}${dim(
+      String(project.sessionCount).padStart(3)
+    )} ${dim(String(project.totalMessages).padStart(5))} ${dim(project.tags)}`
+  )
 }
 
 export function fmtSessionRow(
@@ -124,8 +132,8 @@ export function fmtSessionRow(
   isSelected: boolean,
   isLastSession: boolean
 ) {
-  const project = app.projects[projectIdx]
-  const session = project.sessions![sessionIdx]
+  const project = app.projects[projectIdx]!
+  const session = project.sessions![sessionIdx]!
   const check = isSelected ? green("✓") : " "  // sessions still use boolean check
   const prefix = isLastSession ? "│ " : "├─"
   const title =
@@ -148,27 +156,36 @@ export function fmtSessionRow(
       : session.lastAssistantMsg
     : "(no text response)"
 
-  const tabBadge = session.id ? getSessionGridTabBadge(project.path, session.id) : ""
+  const tabBadgeChunks = session.id ? getSessionGridTabBadgeChunks(project.path, session.id) : []
+
+  const details = t`
+      ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
+      ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
 
   if (status === "busy") {
-    return t`    ${green("●")} ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
-      size.padEnd(7)
-    )} ${fg(ACCENT)('"' + title + '"')} ${green("running")}${tabBadge}
-      ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
-      ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
+    return st(
+      t`    ${green("●")} ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
+        size.padEnd(7)
+      )} ${fg(ACCENT)('"' + title + '"')} ${green("running")}`,
+      ...tabBadgeChunks,
+      details,
+    )
   }
   if (status === "idle") {
-    return t`    ${yellow("◉")} ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
-      size.padEnd(7)
-    )} ${fg(ACCENT)('"' + title + '"')} ${yellow("idle")}${tabBadge}
-      ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
-      ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
+    return st(
+      t`    ${yellow("◉")} ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
+        size.padEnd(7)
+      )} ${fg(ACCENT)('"' + title + '"')} ${yellow("idle")}`,
+      ...tabBadgeChunks,
+      details,
+    )
   }
-  return t`      ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
-    size.padEnd(7)
-  )} ${fg(ACCENT)('"' + title + '"')}
-      ${dim("│")}     ${dim("You:")} ${fg(ACCENT)('"' + promptText + '"')}
-      ${dim("│")}     ${dim("Claude:")} ${fg(ACCENT)('"' + responseText + '"')}`
+  return st(
+    t`      ${dim(prefix)} [${check}] ${dim(age.padEnd(9))} ${dim(
+      size.padEnd(7)
+    )} ${fg(ACCENT)('"' + title + '"')}`,
+    details,
+  )
 }
 
 export function fmtNewSessionRow(projectIdx: number, isSelected: number | undefined) {
@@ -177,7 +194,7 @@ export function fmtNewSessionRow(projectIdx: number, isSelected: number | undefi
 }
 
 export function fmtBranchRow(projectIdx: number, branchName: string, isSelected: boolean) {
-  const project = app.projects[projectIdx]
+  const project = app.projects[projectIdx]!
   const br = project.branches?.find(b => b.name === branchName)
   if (!br) return t`      ${dim("├─")} ${branchName}`
 

@@ -163,3 +163,30 @@ export async function doLaunch() {
   app.selectedSessions.clear()
   app.selectedBranches.clear()
 }
+
+export async function launchScratchSession() {
+  const home = process.env.HOME || "/tmp"
+  ensureGridView()
+
+  // Ensure a tab exists
+  let tabId = app.directGrid!.activeTabId
+  if (tabId < 0 || app.gridTabs.length === 0) {
+    tabId = createNewGridTab()
+  }
+
+  const termW = process.stdout.columns || 120
+  const termH = process.stdout.rows || 40
+  const totalPanes = (app.directGrid!.getTabPaneCount(tabId) || 0) + 1
+  const cols = totalPanes <= 1 ? 1 : totalPanes <= 2 ? 2 : totalPanes <= 4 ? 2 : 3
+  const rows = Math.ceil(totalPanes / cols)
+  const paneW = Math.max(Math.floor(termW / cols) - 2, 20)
+  const paneH = Math.max(Math.floor((termH - 2) / rows) - 4, 6)
+
+  const session = await createSession({
+    projectPath: home,
+    projectName: "Claude",
+    width: paneW,
+    height: paneH,
+  })
+  await app.directGrid!.addPane(session, tabId)
+}

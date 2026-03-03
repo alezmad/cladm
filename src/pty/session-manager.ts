@@ -61,7 +61,7 @@ export async function createSession(opts: {
   // Assign color index based on project path (same project = same color)
   const existingForProject = getSessionByProject(opts.projectPath)
   const ci = existingForProject.length > 0
-    ? existingForProject[0].colorIndex
+    ? existingForProject[0]!.colorIndex
     : colorCounter++
 
   const session: PtySession = {

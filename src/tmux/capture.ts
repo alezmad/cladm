@@ -79,10 +79,10 @@ function processBuffer(sessionName: string, state: PaneCapture) {
     const infoText = frame.slice(sepIdx + SEP.length).trim()
 
     const parts = infoText.split(" ")
-    const cursorX = parseInt(parts[0]) || 0
-    const cursorY = parseInt(parts[1]) || 0
-    const width = parseInt(parts[2]) || 80
-    const height = parseInt(parts[3]) || 24
+    const cursorX = parseInt(parts[0] ?? "") || 0
+    const cursorY = parseInt(parts[1] ?? "") || 0
+    const width = parseInt(parts[2] ?? "") || 80
+    const height = parseInt(parts[3] ?? "") || 24
 
     const lines = contentText.split("\n")
     if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
@@ -157,10 +157,10 @@ export async function capturePane(sessionName: string): Promise<CaptureResult | 
     const infoText = text.slice(sepIdx + SEP.length).trim()
 
     const parts = infoText.split(" ")
-    const cursorX = parseInt(parts[0]) || 0
-    const cursorY = parseInt(parts[1]) || 0
-    const width = parseInt(parts[2]) || 80
-    const height = parseInt(parts[3]) || 24
+    const cursorX = parseInt(parts[0] ?? "") || 0
+    const cursorY = parseInt(parts[1] ?? "") || 0
+    const width = parseInt(parts[2] ?? "") || 80
+    const height = parseInt(parts[3] ?? "") || 24
 
     const lines = contentText.split("\n")
     if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
@@ -177,7 +177,7 @@ const lastHashes = new Map<string, number>()
 export function hasChanged(lines: string[], key = "_default"): boolean {
   let h = 5381
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
+    const line = lines[i]!
     for (let j = 0; j < line.length; j++) {
       h = ((h << 5) + h + line.charCodeAt(j)) | 0
     }

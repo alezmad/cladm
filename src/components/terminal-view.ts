@@ -25,7 +25,7 @@ const PROJECT_COLORS = [
 ]
 
 export function getProjectColor(colorIndex: number): string {
-  return PROJECT_COLORS[colorIndex % PROJECT_COLORS.length]
+  return PROJECT_COLORS[colorIndex % PROJECT_COLORS.length]!
 }
 
 // Push-based terminal view: no poll timers.
@@ -34,7 +34,6 @@ export class TerminalView extends FrameBufferRenderable {
   session: TmuxSession | null = null
   private unsubCapture: (() => void) | null = null
   private lastFrame: ParsedFrame | null = null
-  private _focused = false
   private _flashUntil = 0
   private _idleSince = 0
   private _frameDirty = false
@@ -43,8 +42,8 @@ export class TerminalView extends FrameBufferRenderable {
     super(ctx, options)
   }
 
-  get focused() { return this._focused }
-  set focused(v: boolean) {
+  override get focused() { return this._focused }
+  override set focused(v: boolean) {
     if (this._focused === v) return
     this._focused = v
     // Focused pane captures at ~60fps, unfocused at ~5fps
@@ -123,7 +122,7 @@ export class TerminalView extends FrameBufferRenderable {
 
   // Only write to framebuffer when content actually changed (dirty flag)
   // Previously this re-rendered EVERY paint cycle — major CPU waste
-  protected renderSelf(buffer: OptimizedBuffer) {
+  protected override renderSelf(buffer: OptimizedBuffer) {
     if (this._frameDirty && this.lastFrame) {
       this.renderFrameToBuffer(this.lastFrame)
       this._frameDirty = false
@@ -131,7 +130,7 @@ export class TerminalView extends FrameBufferRenderable {
     super.renderSelf(buffer)
   }
 
-  protected onResize(width: number, height: number) {
+  protected override onResize(width: number, height: number) {
     super.onResize(width, height)
     this._frameDirty = true // Re-render frame to new buffer size
     if (this.session) {
@@ -141,7 +140,7 @@ export class TerminalView extends FrameBufferRenderable {
     }
   }
 
-  protected destroySelf() {
+  protected override destroySelf() {
     this.detach()
     super.destroySelf()
   }

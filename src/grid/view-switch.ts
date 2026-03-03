@@ -19,7 +19,7 @@ export function switchToGrid() {
   if (process.stdin.isTTY) process.stdin.setRawMode(true)
   process.stdin.resume()
   app.rawStdoutWrite("\x1b[?1049h")
-  app.rawStdoutWrite("\x1b[?1000h")
+  app.rawStdoutWrite("\x1b[?1002h")  // button-event tracking (drag support)
   app.rawStdoutWrite("\x1b[?1006h")
 
   if (isNew || app.directGrid!.totalPaneCount === 0) {

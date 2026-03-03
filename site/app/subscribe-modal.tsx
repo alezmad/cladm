@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -89,7 +90,7 @@ export function SubscribeModal() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), project: "cladm" }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as { ok?: boolean; error?: string };
       if (data.ok) {
         setPhase("done");
         sessionStorage.setItem("cladm-subscribed", "1");

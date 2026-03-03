@@ -1,19 +1,14 @@
-import { StyledText } from "@opentui/core"
+import { StyledText, type TextChunk } from "@opentui/core"
 
-type Chunk = { __isChunk: true; text: string; attributes: number; fg?: unknown; bg?: unknown }
-type StyledPart = string | StyledText | Chunk
+type StyledPart = string | StyledText | TextChunk
 
-// Concatenate styled text parts into a single StyledText.
-// OpenTUI's t`` tag doesn't handle StyledText interpolation — it calls
-// toString() which produces "[object Object]". This helper merges chunks
-// from multiple t`` results, TextChunks, and plain strings.
 export function st(...parts: StyledPart[]): StyledText {
-  const chunks: Chunk[] = []
+  const chunks: TextChunk[] = []
   for (const p of parts) {
     if (p instanceof StyledText) chunks.push(...p.chunks)
-    else if (p && typeof p === "object" && "__isChunk" in p) chunks.push(p as Chunk)
+    else if (p && typeof p === "object" && "__isChunk" in p) chunks.push(p)
     else if (typeof p === "string") {
-      if (p.length > 0) chunks.push({ __isChunk: true, text: p, attributes: 0 } as Chunk)
+      if (p.length > 0) chunks.push({ __isChunk: true, text: p } as TextChunk)
     }
   }
   return new StyledText(chunks)

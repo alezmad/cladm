@@ -3,9 +3,9 @@
 
 import type { Subprocess } from "bun"
 
-let shell: Subprocess<"ignore", "pipe", "ignore"> | null = null
+let shell: Subprocess<"pipe", "ignore", "ignore"> | null = null
 
-function getShell() {
+function getShell(): Subprocess<"pipe", "ignore", "ignore"> {
   if (shell && !shell.killed) return shell
   shell = Bun.spawn(["sh"], {
     stdin: "pipe",
@@ -27,7 +27,7 @@ export function sendKeys(sessionName: string, rawSequence: string): void {
     cmd = `tmux send-keys -t '${sessionName}' -H ${hex}\n`
   }
 
-  sh.stdin.write(cmd)
+  sh.stdin!.write(cmd)
 }
 
 // Forward mouse events to tmux as SGR escape sequences
@@ -37,7 +37,7 @@ export function sendMouseEvent(sessionName: string, x: number, y: number, btn: n
   const seq = `\x1b[<${btn};${x};${y}${end}`
   const hex = [...seq].map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ")
   const cmd = `tmux send-keys -t '${sessionName}' -H ${hex}\n`
-  sh.stdin.write(cmd)
+  sh.stdin!.write(cmd)
 }
 
 // Scroll a tmux pane using copy-mode (works with any application in the pane)
@@ -45,17 +45,17 @@ export function sendScroll(sessionName: string, direction: "up" | "down", lines 
   const sh = getShell()
   if (direction === "up") {
     // Enter copy mode (no-op if already in it) then scroll up
-    sh.stdin.write(`tmux copy-mode -t '${sessionName}' 2>/dev/null; tmux send-keys -t '${sessionName}' -X -N ${lines} scroll-up 2>/dev/null\n`)
+    sh.stdin!.write(`tmux copy-mode -t '${sessionName}' 2>/dev/null; tmux send-keys -t '${sessionName}' -X -N ${lines} scroll-up 2>/dev/null\n`)
   } else {
     // Scroll down in copy mode; if we hit bottom, exit copy mode
-    sh.stdin.write(`tmux send-keys -t '${sessionName}' -X -N ${lines} scroll-down 2>/dev/null\n`)
+    sh.stdin!.write(`tmux send-keys -t '${sessionName}' -X -N ${lines} scroll-down 2>/dev/null\n`)
   }
 }
 
 // Exit copy mode (e.g., when user starts typing)
 export function exitCopyMode(sessionName: string): void {
   const sh = getShell()
-  sh.stdin.write(`tmux send-keys -t '${sessionName}' -X cancel 2>/dev/null\n`)
+  sh.stdin!.write(`tmux send-keys -t '${sessionName}' -X cancel 2>/dev/null\n`)
 }
 
 export function cleanupInputQueue(_sessionName: string) {
@@ -64,7 +64,7 @@ export function cleanupInputQueue(_sessionName: string) {
 
 export function destroyShell() {
   if (shell && !shell.killed) {
-    shell.stdin.end()
+    shell.stdin!.end()
     shell.kill()
   }
   shell = null

@@ -3,9 +3,10 @@
 // Each pane renders independently via PTY capture push callbacks.
 
 import { DirectPane } from "./direct-pane"
-import { startCapture, stopCapture, resizeCapture, resetHash, getLatestFrame, getFullBuffer, scrollPane, getScrollOffset } from "../pty/capture"
+import { startCapture, stopCapture, resizeCapture, resetHash, getLatestFrame, getFullBuffer, scrollPane, getScrollOffset, getScrollInfo, scrollToOffset } from "../pty/capture"
 import { writeToSession, resizeSession, killSession, type PtySession } from "../pty/session-manager"
 import { app, type GridTab } from "../lib/state"
+import { pct, makeBar, formatCost, PLAN_LIMITS } from "../data/usage"
 
 export type PaneStatus = "busy" | "idle" | null
 
@@ -55,6 +56,16 @@ const YELLOW_FG = hexFg("#e0af68")
 const TAB_ACTIVE_BG = hexBg("#1a1b26")
 const TAB_DIM_BG = hexBg("#16161e")
 
+// TTS announce pane name on focus change (fire-and-forget)
+const TTS_HOOK = `${process.env.HOME}/.claude/hooks/play-tts.sh`
+let _lastAnnounce = 0
+function announcePaneName(name: string) {
+  const now = Date.now()
+  if (now - _lastAnnounce < 500) return  // debounce rapid navigation
+  _lastAnnounce = now
+  try { Bun.spawn(["bash", TTS_HOOK, name], { stdout: "ignore", stderr: "ignore" }) } catch {}
+}
+
 function fmtElapsed(sinceMs: number): string {
   if (!sinceMs) return ""
   const sec = Math.floor((Date.now() - sinceMs) / 1000)
@@ -77,10 +88,10 @@ export class DirectGridRenderer {
   private _activeTabId = -1
 
   private writeRaw: (s: string) => boolean
-  private flashTimers = new Map<string, ReturnType<typeof setInterval>>()
+  private pulseTimers = new Map<string, ReturnType<typeof setInterval>>()
+  private pulseStopTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private titleTimer: ReturnType<typeof setInterval> | null = null
   private running = false
-  private _selectMode = false
 
   // Tab bar hit-test regions (col ranges for each tab)
   private tabBarHitRegions: { tabId: number, startCol: number, endCol: number }[] = []
@@ -88,10 +99,22 @@ export class DirectGridRenderer {
   private tabBarAddBtnCol = -1
   // Pane name hit-test regions (inline in tab bar, row 1)
   private paneListHitRegions: { tabId: number, paneIndex: number, startCol: number, endCol: number }[] = []
+  // Footer scratch button hit region
+  private scratchBtnHit: { startCol: number, endCol: number } | null = null
 
   // Pending close state
   private _pendingCloseTabId = -1
   private _pendingCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Scrollbar drag state
+  _scrollDrag: {
+    sessionName: string
+    paneIndex: number
+    trackTop: number      // screen row where track starts
+    trackHeight: number
+    thumbSize: number
+    scrollbackLength: number
+  } | null = null
 
   constructor(rawWrite: (s: string) => boolean) {
     this.writeRaw = rawWrite
@@ -136,8 +159,10 @@ export class DirectGridRenderer {
   stop() {
     this.running = false
     if (this.titleTimer) { clearInterval(this.titleTimer); this.titleTimer = null }
-    for (const timer of this.flashTimers.values()) clearInterval(timer)
-    this.flashTimers.clear()
+    for (const timer of this.pulseTimers.values()) clearInterval(timer)
+    this.pulseTimers.clear()
+    for (const timer of this.pulseStopTimers.values()) clearTimeout(timer)
+    this.pulseStopTimers.clear()
     for (const [, panes] of this.tabPanes) {
       for (const p of panes) {
         p.directPane.detach()
@@ -179,52 +204,17 @@ export class DirectGridRenderer {
   get paneCount() { return this.panes.length }
   get totalPaneCount() { let n = 0; for (const [, p] of this.tabPanes) n += p.length; return n }
   get focusedPane(): GridPaneInfo | null { return this.panes[this._focusIndex] ?? null }
-  get selectMode() { return this._selectMode }
   get isExpanded() { return this._expandedIndex >= 0 }
   get isSoftExpanded() { return this._softExpandIndex >= 0 }
   get activeTabId() { return this._activeTabId }
 
-  enterSelectMode() {
-    this._selectMode = true
-    this.writeRaw("\x1b[?1000l\x1b[?1006l")
-    this.writeRaw(SHOW_CURSOR)
-    this.drawSelectView()
-  }
-
-  exitSelectMode() {
-    this._selectMode = false
-    this.writeRaw("\x1b[?1000h\x1b[?1006h")
-    this.writeRaw(HIDE_CURSOR + CLEAR)
-    this.forceRedrawAll()
-  }
-
-  private drawSelectView() {
+  openInTextEdit() {
     const pane = this.focusedPane
     if (!pane) return
-    const termW = process.stdout.columns || 120
     const lines = getFullBuffer(pane.session.name) ?? []
-    const color = getColor(pane.session.colorIndex)
-
-    // Banner + all buffer lines dumped as plain text (terminal handles native scrollback)
-    let out = SYNC_START + CLEAR
-
-    // Banner row
-    const bannerBg = hexBg("#e0af68")
-    const bannerFg = "\x1b[38;2;0;0;0m"
-    const bannerText = " SELECTION MODE "
-    const hint = " Esc to exit "
-    const pad = Math.max(0, termW - bannerText.length - hint.length)
-    out += `\x1b[1;1H${bannerBg}${bannerFg}${BOLD}${bannerText}${" ".repeat(pad)}${hint}${RESET}`
-
-    // Project name on row 2
-    out += `\x1b[2;1H${hexFg(color)}${BOLD}${pane.session.projectName}${RESET}  ${DIM}drag to select │ cmd+c copy │ scroll up for history${RESET}`
-
-    // Dump full buffer starting row 3 — native terminal scrollback handles overflow
-    for (let r = 0; r < lines.length; r++) {
-      out += `\x1b[${r + 3};1H${lines[r]}\x1b[0m`
-    }
-    out += SYNC_END
-    this.writeRaw(out)
+    const plain = lines.map(l => l.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\].*?\x07/g, "")).join("\n")
+    const tmp = `/tmp/cladm-${pane.session.projectName.replace(/[^a-zA-Z0-9_-]/g, "_")}.txt`
+    Bun.write(tmp, plain).then(() => Bun.spawn(["open", "-a", "TextEdit", tmp]))
   }
 
   expandPane(index?: number) {
@@ -237,7 +227,6 @@ export class DirectGridRenderer {
   }
 
   collapsePane() {
-    if (this._selectMode) this.exitSelectMode()
     this._expandedIndex = -1
     this._softExpandIndex = -1
     this.repositionAll()
@@ -278,7 +267,7 @@ export class DirectGridRenderer {
         p.directPane.detach()
         stopCapture(p.session.name)
         killSession(p.session.name)
-        this.clearFlash(p.session.name)
+        this.clearPulse(p.session.name)
       }
     }
     this.tabPanes.delete(tabId)
@@ -370,7 +359,14 @@ export class DirectGridRenderer {
 
   // Check if a click hit a button on the top border. Returns action + pane index.
   // Hit areas are widened beyond the visible dot characters to make clicking easier.
-  checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab" | "panefocus" | "closetab" | "closepane" | "openfolder", paneIndex: number, tabId?: number } | null {
+  checkButtonClick(col: number, row: number): { action: "max" | "min" | "sel" | "tab" | "newtab" | "panefocus" | "closetab" | "closepane" | "openfolder" | "newsession" | "scratch" | "move-left" | "move-up" | "move-down" | "move-right", paneIndex: number, tabId?: number } | null {
+    // Footer row — scratch button
+    const termH = process.stdout.rows || 40
+    if (row === termH && this.scratchBtnHit) {
+      if (col >= this.scratchBtnHit.startCol - 1 && col <= this.scratchBtnHit.endCol) {
+        return { action: "scratch", paneIndex: -1 }
+      }
+    }
     // Tab bar check (row 1) — includes inline pane names
     if (row === 1) {
       // Check close buttons first — widened ±1 around the × character
@@ -410,19 +406,32 @@ export class DirectGridRenderer {
         // close (red): rightmost, positions bw-5..bw-3 (before ─╮)
         if (col >= bx + bw - 5 && col <= bx + bw - 3) return { action: this.isExpanded ? "closepane" : "closepane", paneIndex: i }
         if (this.isExpanded) {
-          // Layout: ...─[●] ─[●] [●] [●]─╮
+          // Layout: ...─[+] ─[●] ─[●] [●] [●]─╮
           // min (yellow): bw-9..bw-7
           if (col >= bx + bw - 9 && col <= bx + bw - 7) return { action: "min", paneIndex: i }
           // sel (green): bw-13..bw-11
           if (col >= bx + bw - 13 && col <= bx + bw - 11) return { action: "sel", paneIndex: i }
           // folder (blue): bw-18..bw-16 (after ─ gap)
           if (col >= bx + bw - 18 && col <= bx + bw - 16) return { action: "openfolder", paneIndex: i }
+          // new session (cyan [+]): bw-23..bw-21
+          if (col >= bx + bw - 23 && col <= bx + bw - 21) return { action: "newsession", paneIndex: i }
         } else {
-          // Layout: ...─[●] ─[●] [●]─╮
+          // Layout: ...─[+] ─[●] ─[●] [●] [●]─╮
           // max (green): bw-9..bw-7
           if (col >= bx + bw - 9 && col <= bx + bw - 7) return { action: "max", paneIndex: i }
-          // folder (blue): bw-14..bw-12 (after ─ gap)
-          if (col >= bx + bw - 14 && col <= bx + bw - 12) return { action: "openfolder", paneIndex: i }
+          // sel (textedit): bw-13..bw-11
+          if (col >= bx + bw - 13 && col <= bx + bw - 11) return { action: "sel", paneIndex: i }
+          // folder (blue): bw-18..bw-16 (after ─ gap)
+          if (col >= bx + bw - 18 && col <= bx + bw - 16) return { action: "openfolder", paneIndex: i }
+          // new session (cyan [+]): bw-23..bw-21
+          if (col >= bx + bw - 23 && col <= bx + bw - 21) return { action: "newsession", paneIndex: i }
+          // Arrow buttons on left: ╭─[◀] [▲] [▼] [▶]─
+          if (this.panes.length > 1) {
+            if (col >= bx + 2 && col <= bx + 4) return { action: "move-left", paneIndex: i }
+            if (col >= bx + 6 && col <= bx + 8) return { action: "move-up", paneIndex: i }
+            if (col >= bx + 10 && col <= bx + 12) return { action: "move-down", paneIndex: i }
+            if (col >= bx + 14 && col <= bx + 16) return { action: "move-right", paneIndex: i }
+          }
         }
         continue
       }
@@ -487,7 +496,7 @@ export class DirectGridRenderer {
       pane.directPane.detach()
       stopCapture(pane.session.name)
       killSession(pane.session.name)
-      this.clearFlash(sessionName)
+      this.clearPulse(sessionName)
       panes.splice(idx, 1)
 
       if (tabId === this._activeTabId) {
@@ -508,8 +517,14 @@ export class DirectGridRenderer {
 
   setFocus(index: number) {
     if (index < 0 || index >= this.panes.length) return
+    const prev = this._focusIndex
     this._focusIndex = index
     this.drawChrome()
+    // TTS announce project name on focus change
+    if (prev !== index && this.panes.length > 1) {
+      const pane = this.panes[index]
+      if (pane) announcePaneName(pane.session.projectName)
+    }
   }
 
   focusNext() {
@@ -520,6 +535,32 @@ export class DirectGridRenderer {
   focusPrev() {
     if (this.panes.length === 0) return
     this.setFocus((this._focusIndex - 1 + this.panes.length) % this.panes.length)
+  }
+
+  swapPane(dir: "up" | "down" | "left" | "right") {
+    const n = this.panes.length
+    if (n <= 1) return
+    const { cols } = this.calcGrid(n)
+    const rows = Math.ceil(n / cols)
+    const curCol = this._focusIndex % cols
+    const curRow = Math.floor(this._focusIndex / cols)
+    let nc = curCol, nr = curRow
+    switch (dir) {
+      case "left":  nc = curCol - 1; break
+      case "right": nc = curCol + 1; break
+      case "up":    nr = curRow - 1; break
+      case "down":  nr = curRow + 1; break
+    }
+    if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) return
+    const targetIdx = nr * cols + nc
+    if (targetIdx < 0 || targetIdx >= n) return
+    const panes = this.tabPanes.get(this._activeTabId)
+    if (!panes) return
+    const tmp = panes[this._focusIndex]!
+    panes[this._focusIndex] = panes[targetIdx]!
+    panes[targetIdx] = tmp
+    this._focusIndex = targetIdx
+    this.repositionAll()
   }
 
   focusByDirection(dir: "up" | "down" | "left" | "right") {
@@ -605,10 +646,25 @@ export class DirectGridRenderer {
     return (idx >= 0 && idx < n) ? idx : -1
   }
 
+  // ─── Usage bars for footer ────────────────────────────
+
+  private fmtUsageBars(): string {
+    const u = app.cachedUsage
+    if (!u) return ""
+    const BAR_W = 10
+    const sPct = pct(u.totalCost, PLAN_LIMITS.session)
+    const sBar = makeBar(u.totalCost, PLAN_LIMITS.session, BAR_W)
+    const wPct = pct(u.weekTotal, PLAN_LIMITS.weeklyAll)
+    const wBar = makeBar(u.weekTotal, PLAN_LIMITS.weeklyAll, BAR_W)
+    const sClr = sPct >= 80 ? hexFg("#e0af68") : sPct >= 50 ? hexFg("#7dcfff") : hexFg("#9ece6a")
+    const wClr = wPct >= 80 ? hexFg("#e0af68") : wPct >= 50 ? hexFg("#7dcfff") : hexFg("#9ece6a")
+    return `${DIM}ses${RESET} ${sClr}${sBar}${RESET} ${BOLD}${sPct}%${RESET} ${DIM}│ wk${RESET} ${wClr}${wBar}${RESET} ${BOLD}${wPct}%${RESET}`
+  }
+
   // ─── Chrome ────────────────────────────────────────────
 
   drawChrome() {
-    if (!this.running || this._selectMode) return
+    if (!this.running) return
     const termW = process.stdout.columns || 120
     const termH = process.stdout.rows || 40
 
@@ -621,18 +677,15 @@ export class DirectGridRenderer {
     const n = this.panes.length
     const fi = this._focusIndex + 1
     let headerLeft: string, headerRight: string
-    if (this._selectMode) {
-      headerLeft = `  ${BOLD}cladm grid${RESET} — ${hexFg("#9ece6a")}${BOLD}SELECT MODE${RESET}`
-      headerRight = `${DIM}drag to select │ cmd+c copy │ ${BOLD}Esc${RESET}${DIM} exit select${RESET}`
-    } else if (this.isExpanded) {
+    if (this.isExpanded) {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${hexFg("#7dcfff")}${BOLD}EXPANDED${RESET} │ ${fi}/${n}`
-      headerRight = `${DIM}${hexFg("#f7768e")}[●]${RESET}${DIM} close │ ${hexFg("#e0af68")}[●]${RESET}${DIM} restore │ ${hexFg("#9ece6a")}[●]${RESET}${DIM} select │ ctrl+space picker${RESET}`
+      headerRight = `${DIM}${hexFg("#f7768e")}[●]${RESET}${DIM} close │ ${hexFg("#e0af68")}[●]${RESET}${DIM} restore │ ctrl+s textedit │ ctrl+space picker${RESET}`
     } else if (this.isSoftExpanded) {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${hexFg("#bb9af7")}${BOLD}FOCUS${RESET} │ ${fi}/${n}`
-      headerRight = `${DIM}click pane to focus │ ${hexFg("#9ece6a")}[●]${RESET}${DIM} fullscreen │ ctrl+s select │ ctrl+e toggle${RESET}`
+      headerRight = `${DIM}click pane to focus │ ${hexFg("#9ece6a")}[●]${RESET}${DIM} fullscreen │ ctrl+s textedit │ ctrl+e toggle${RESET}`
     } else {
       headerLeft = `  ${BOLD}cladm grid${RESET} — ${n} sessions │ focus: ${fi}/${n}`
-      headerRight = `${DIM}shift+arrows nav │ ${hexFg("#f7768e")}[●]${RESET}${DIM} close ${hexFg("#9ece6a")}[●]${RESET}${DIM} expand │ ctrl+s select │ ctrl+space picker${RESET}`
+      headerRight = `${DIM}shift+arrows nav │ ${hexFg("#f7768e")}[●]${RESET}${DIM} close ${hexFg("#9ece6a")}[●]${RESET}${DIM} expand │ ctrl+s textedit │ ctrl+space picker${RESET}`
     }
     out += `\x1b[2;1H\x1b[${termW}X${headerLeft}   ${headerRight}`
 
@@ -645,21 +698,31 @@ export class DirectGridRenderer {
       }
     }
 
-    // Footer (last row)
+    // Footer (last row) — usage bars + scratch button
     const pane = this.focusedPane
-    if (this._selectMode) {
-      out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg("#9ece6a")}${BOLD}SELECT MODE${RESET}  ${DIM}drag to select text │ cmd+c to copy │ press ${BOLD}Esc${RESET}${DIM} to exit${RESET}`
-    } else if (this.isExpanded && pane) {
+    const usageStr = this.fmtUsageBars()
+    const scratchLabel = `${hexFg("#9ece6a")}[+ claude]${RESET}`
+    const scratchVisLen = 10
+    const scratchStart = termW - scratchVisLen
+    this.scratchBtnHit = { startCol: scratchStart, endCol: termW }
+
+    out += `\x1b[${termH};1H\x1b[${termW}X`
+    if (this.isExpanded && pane) {
       const color = getColor(pane.session.colorIndex)
-      out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg(color)}▸${RESET} ${BOLD}${pane.session.projectName}${RESET}   ${DIM}expanded │ ctrl+s select │ Esc or ${hexFg("#e0af68")}[●]${RESET}${DIM} to restore grid${RESET}`
+      out += `  ${hexFg(color)}▸${RESET} ${BOLD}${pane.session.projectName}${RESET}   ${DIM}expanded${RESET}`
     } else if (pane) {
       const color = getColor(pane.session.colorIndex)
       const sid = pane.session.sessionId ? ` ${DIM}#${pane.session.sessionId.slice(0, 8)}${RESET}` : ""
-      const expandNote = app.clickExpand ? `${DIM} │ click-expand: on${RESET}` : ""
-      out += `\x1b[${termH};1H\x1b[${termW}X  ${hexFg(color)}▸${RESET} ${BOLD}${pane.session.projectName}${RESET}${sid}   ${DIM}all input goes to focused pane${RESET}${expandNote}`
+      out += `  ${hexFg(color)}▸${RESET} ${BOLD}${pane.session.projectName}${RESET}${sid}`
     } else {
-      out += `\x1b[${termH};1H\x1b[${termW}X  ${DIM}No sessions. Press ctrl+space to return to picker.${RESET}`
+      out += `  ${DIM}No sessions${RESET}`
     }
+    // Usage bars — right-aligned before scratch button
+    if (usageStr) {
+      const usageCol = scratchStart - 42 // enough room for bars
+      if (usageCol > 20) out += `\x1b[${termH};${usageCol}H${usageStr}`
+    }
+    out += `\x1b[${termH};${scratchStart}H${scratchLabel}`
 
     out += SYNC_END
     this.writeRaw(out)
@@ -696,7 +759,7 @@ export class DirectGridRenderer {
       const tabPanes = this.tabPanes.get(tab.id) ?? []
 
       // Build pane name list for this tab
-      const paneLabels: { name: string, color: string, status: PaneStatus, isFocused: boolean }[] = []
+      const paneLabels: { name: string, color: string, status: PaneStatus, isFocused: boolean, isPulsing: boolean }[] = []
       for (let pi = 0; pi < tabPanes.length; pi++) {
         const p = tabPanes[pi]!
         const name = p.session.projectName
@@ -706,6 +769,7 @@ export class DirectGridRenderer {
           color: getColor(p.session.colorIndex),
           status: p.status,
           isFocused: isActive && this._focusIndex === pi,
+          isPulsing: this.pulseTimers.has(p.session.name),
         })
       }
 
@@ -722,14 +786,18 @@ export class DirectGridRenderer {
 
         for (let pi = 0; pi < paneLabels.length; pi++) {
           const pl = paneLabels[pi]!
+          const pulseOn = pl.isPulsing && Math.floor(Date.now() / 500) % 2 === 0
           let icon: string
           if (pl.status === "busy") icon = `${hexFg("#9ece6a")}●${RESET}`
+          else if (pl.status === "idle" && pulseOn) icon = `${hexFg("#ff9e64")}${BOLD}◉${RESET}`
           else if (pl.status === "idle") icon = `${hexFg("#e0af68")}◉${RESET}`
           else icon = `${DIM}○${RESET}`
 
           const paneStartCol = col
           if (pl.isFocused) {
             out += `${TAB_BG_ACTIVE}${icon} ${hexFg(pl.color)}${BOLD}${pl.name}${RESET}`
+          } else if (pulseOn) {
+            out += `${TAB_BG_ACTIVE}${icon} ${hexFg("#ff9e64")}${pl.name}${RESET}`
           } else {
             out += `${TAB_BG_ACTIVE}${icon} ${DIM}${pl.name}${RESET}`
           }
@@ -760,13 +828,19 @@ export class DirectGridRenderer {
 
         for (let pi = 0; pi < paneLabels.length; pi++) {
           const pl = paneLabels[pi]!
+          const pulseOn = pl.isPulsing && Math.floor(Date.now() / 500) % 2 === 0
           let icon: string
-          if (pl.status === "idle") icon = `${YELLOW_FG}◉${RESET}`
+          if (pl.status === "idle" && pulseOn) icon = `${hexFg("#ff9e64")}${BOLD}◉${RESET}`
+          else if (pl.status === "idle") icon = `${YELLOW_FG}◉${RESET}`
           else if (pl.status === "busy") icon = `${DIM}●${RESET}`
           else icon = `${DIM}○${RESET}`
 
           const paneStartCol = col
-          out += `${icon} ${DIM}${pl.name}${RESET}`
+          if (pulseOn) {
+            out += `${icon} ${hexFg("#ff9e64")}${pl.name}${RESET}`
+          } else {
+            out += `${icon} ${DIM}${pl.name}${RESET}`
+          }
           col += 2 + pl.name.length
           this.paneListHitRegions.push({ tabId: tab.id, paneIndex: pi, startCol: paneStartCol, endCol: col - 1 })
 
@@ -804,14 +878,16 @@ export class DirectGridRenderer {
     const pane = this.panes[index]!
     const dp = pane.directPane
     const isFocused = index === this._focusIndex
-    const isFlashing = this.flashTimers.has(pane.session.name)
+    const isPulsing = this.pulseTimers.has(pane.session.name)
     const isSoftExp = this._softExpandIndex === index
 
     const color = getColor(pane.session.colorIndex)
+    // During pulse: alternate between orange and pane color every 500ms
+    const pulseOn = isPulsing && Math.floor(Date.now() / 500) % 2 === 0
     let borderColor: string
     if (isFocused) borderColor = WHITE
     else if (isSoftExp) borderColor = hexFg("#bb9af7")
-    else if (isFlashing) borderColor = hexFg("#ff9e64")
+    else if (pulseOn) borderColor = hexFg("#ff9e64")
     else borderColor = hexFg(color)
 
     const tl = isFocused ? "┏" : "╭"
@@ -835,21 +911,28 @@ export class DirectGridRenderer {
     const DIM_BTN = `${DIM}[●]${RESET}`
 
     const BLUE_BTN = `${hexFg("#7dcfff")}[●]${RESET}`     // open folder
+    const CYAN_PLUS = `${hexFg("#7dcfff")}[+]${RESET}`   // new session
 
     let btnSection: string
     let btnVisibleLen: number
+    let leftSection = ""
+    let leftVisibleLen = 0
     if (this.isExpanded) {
-      // Expanded: folder · gap · select · minimize · close
-      const selBtn = this._selectMode ? `${hexFg("#9ece6a")}${BOLD}[●]${RESET}` : DIM_BTN
-      btnSection = `${borderColor}${hz}${RESET}${BLUE_BTN}${borderColor} ${hz}${RESET}${selBtn} ${YELLOW_BTN} ${RED_BTN}${borderColor}`
-      btnVisibleLen = 1 + 3 + 1 + 1 + 3 + 1 + 3 + 1 + 3 // ─[●] ─[●] [●] [●]
+      // Expanded: new-session · folder · gap · select · minimize · close
+      btnSection = `${borderColor}${hz}${RESET}${CYAN_PLUS}${borderColor} ${hz}${RESET}${BLUE_BTN}${borderColor} ${hz}${RESET}${DIM_BTN} ${YELLOW_BTN} ${RED_BTN}${borderColor}`
+      btnVisibleLen = 1 + 3 + 1 + 1 + 3 + 1 + 1 + 3 + 1 + 3 + 1 + 3 // ─[+] ─[●] ─[●] [●] [●]
     } else {
-      // Grid: folder · gap · expand · close
-      btnSection = `${borderColor}${hz}${RESET}${BLUE_BTN}${borderColor} ${hz}${RESET}${GREEN_BTN} ${RED_BTN}${borderColor}`
-      btnVisibleLen = 1 + 3 + 1 + 1 + 3 + 1 + 3 // ─[●] ─[●] [●]
+      // Grid: new-session · folder · gap · textedit · expand · close
+      btnSection = `${borderColor}${hz}${RESET}${CYAN_PLUS}${borderColor} ${hz}${RESET}${BLUE_BTN}${borderColor} ${hz}${RESET}${DIM_BTN} ${GREEN_BTN} ${RED_BTN}${borderColor}`
+      btnVisibleLen = 1 + 3 + 1 + 1 + 3 + 1 + 1 + 3 + 1 + 3 + 1 + 3 // ─[+] ─[●] ─[●] [●] [●]
+      // Arrow buttons on left for pane reordering (only in grid with 2+ panes)
+      if (this.panes.length > 1) {
+        leftSection = `${borderColor}${hz}${RESET}${DIM}[◀] [▲] [▼] [▶]${RESET}${borderColor}`
+        leftVisibleLen = 1 + 15 // ─[◀] [▲] [▼] [▶]
+      }
     }
-    const hzFill = Math.max(0, bw - 2 - btnVisibleLen - 1)
-    out += `\x1b[${by};${bx}H${borderColor}${tl}${hz.repeat(hzFill)}${btnSection}${hz}${tr}${RESET}`
+    const hzFill = Math.max(0, bw - 2 - btnVisibleLen - leftVisibleLen - 1)
+    out += `\x1b[${by};${bx}H${borderColor}${tl}${leftSection}${hz.repeat(hzFill)}${btnSection}${hz}${tr}${RESET}`
 
     // Title row
     const nameColor = hexFg(color)
@@ -873,10 +956,34 @@ export class DirectGridRenderer {
     out += `\x1b[${by + 2};${bx}H${borderColor}${vt}${RESET}\x1b[${bw - 2}X ${DIM}${pane.session.projectPath}${RESET}`
     out += `\x1b[${by + 2};${bx + bw - 1}H${borderColor}${vt}${RESET}`
 
-    // Side borders for content rows
+    // Side borders for content rows + scrollbar on right border
+    const scrollInfo = getScrollInfo(pane.session.name)
+    const hasScrollbar = scrollInfo !== null && scrollInfo.scrollbackLength > 0
+    let thumbTop = 0, thumbSize = 0
+    if (hasScrollbar) {
+      const trackHeight = dp.height
+      const totalLines = scrollInfo.scrollbackLength + scrollInfo.screenHeight
+      thumbSize = Math.max(1, Math.floor(trackHeight * trackHeight / totalLines))
+      const maxScroll = scrollInfo.scrollbackLength
+      thumbTop = maxScroll > 0
+        ? Math.floor((maxScroll - scrollInfo.offset) / maxScroll * (trackHeight - thumbSize))
+        : trackHeight - thumbSize
+    }
+
     for (let r = 0; r < dp.height; r++) {
       out += `\x1b[${dp.screenY + r};${bx}H${borderColor}${vt}${RESET}`
       out += `\x1b[${dp.screenY + r};${bx + bw - 1}H${borderColor}${vt}${RESET}`
+      if (hasScrollbar) {
+        // Draw scrollbar inside the frame, one column left of the right border
+        const scrollCol = bx + bw - 2
+        const isThumb = r >= thumbTop && r < thumbTop + thumbSize
+        if (isThumb) {
+          const thumbColor = isFocused ? WHITE : hexFg(color)
+          out += `\x1b[${dp.screenY + r};${scrollCol}H${thumbColor}█${RESET}`
+        } else {
+          out += `\x1b[${dp.screenY + r};${scrollCol}H${DIM}░${RESET}`
+        }
+      }
     }
 
     // Bottom border
@@ -885,13 +992,53 @@ export class DirectGridRenderer {
     return out
   }
 
+  // ─── Scrollbar hit-test ──────────────────────────────────
+
+  checkScrollbarClick(col: number, row: number): { paneIndex: number, sessionName: string, trackTop: number, trackHeight: number, thumbSize: number, scrollbackLength: number } | null {
+    const indicesToCheck = this.isExpanded ? [this._expandedIndex] : this.panes.map((_, i) => i)
+    for (const i of indicesToCheck) {
+      const pane = this.panes[i]
+      if (!pane) continue
+      const dp = pane.directPane
+      const bx = dp.screenX - 1
+      const bw = dp.width + 2
+      const scrollCol = bx + bw - 2  // one column inside the right border
+
+      if (col !== scrollCol) continue
+      if (row < dp.screenY || row >= dp.screenY + dp.height) continue
+
+      const scrollInfo = getScrollInfo(pane.session.name)
+      if (!scrollInfo || scrollInfo.scrollbackLength <= 0) continue
+
+      const trackHeight = dp.height
+      const totalLines = scrollInfo.scrollbackLength + scrollInfo.screenHeight
+      const thumbSize = Math.max(1, Math.floor(trackHeight * trackHeight / totalLines))
+
+      return {
+        paneIndex: i,
+        sessionName: pane.session.name,
+        trackTop: dp.screenY,
+        trackHeight,
+        thumbSize,
+        scrollbackLength: scrollInfo.scrollbackLength,
+      }
+    }
+    return null
+  }
+
+  scrollbarRowToOffset(trackTop: number, trackHeight: number, thumbSize: number, scrollbackLength: number, mouseRow: number): number {
+    const relRow = mouseRow - trackTop
+    const maxThumbTop = trackHeight - thumbSize
+    if (maxThumbTop <= 0) return 0
+    // Center the thumb on the click point
+    const thumbTop = Math.max(0, Math.min(relRow - Math.floor(thumbSize / 2), maxThumbTop))
+    // thumbTop=0 → offset=scrollbackLength (top), thumbTop=maxThumbTop → offset=0 (bottom/live)
+    return Math.round(scrollbackLength * (1 - thumbTop / maxThumbTop))
+  }
+
   // ─── Content rendering ─────────────────────────────────
 
   private drawPane(index: number, lines: string[]) {
-    if (this._selectMode) {
-      if (index === this._focusIndex) this.drawSelectView()
-      return
-    }
     if (this.isExpanded && index !== this._expandedIndex) return
     const pane = this.panes[index]
     if (!pane) return
@@ -936,7 +1083,7 @@ export class DirectGridRenderer {
     const pane = this.findPaneAcrossTabs(sessionName)
     if (!pane) return
     if (pane.status !== "idle") { pane.status = "idle"; pane.statusSince = Date.now() }
-    this.startFlash(sessionName)
+    this.startPulse(sessionName)
     this.drawChrome()
   }
 
@@ -944,7 +1091,7 @@ export class DirectGridRenderer {
     const pane = this.findPaneAcrossTabs(sessionName)
     if (!pane) return
     if (pane.status !== "busy") { pane.status = "busy"; pane.statusSince = Date.now() }
-    this.clearFlash(sessionName)
+    this.clearPulse(sessionName)
     this.drawChrome()
   }
 
@@ -952,7 +1099,7 @@ export class DirectGridRenderer {
     const pane = this.findPaneAcrossTabs(sessionName)
     if (!pane) return
     pane.status = null; pane.statusSince = 0
-    this.clearFlash(sessionName)
+    this.clearPulse(sessionName)
     this.drawChrome()
   }
 
@@ -964,15 +1111,27 @@ export class DirectGridRenderer {
     return null
   }
 
-  startFlash(sessionName: string) {
-    if (this.flashTimers.has(sessionName)) return
-    const timer = setInterval(() => this.drawChrome(), 400)
-    this.flashTimers.set(sessionName, timer)
+  isPulsing(sessionName: string): boolean {
+    return this.pulseTimers.has(sessionName)
   }
 
-  clearFlash(sessionName: string) {
-    const timer = this.flashTimers.get(sessionName)
-    if (timer) { clearInterval(timer); this.flashTimers.delete(sessionName) }
+  private startPulse(sessionName: string) {
+    if (this.pulseTimers.has(sessionName)) return
+    const timer = setInterval(() => this.drawChrome(), 500)
+    this.pulseTimers.set(sessionName, timer)
+    // Auto-stop after 10 seconds
+    const stopTimer = setTimeout(() => {
+      this.clearPulse(sessionName)
+      this.drawChrome()
+    }, 10_000)
+    this.pulseStopTimers.set(sessionName, stopTimer)
+  }
+
+  private clearPulse(sessionName: string) {
+    const timer = this.pulseTimers.get(sessionName)
+    if (timer) { clearInterval(timer); this.pulseTimers.delete(sessionName) }
+    const stopTimer = this.pulseStopTimers.get(sessionName)
+    if (stopTimer) { clearTimeout(stopTimer); this.pulseStopTimers.delete(sessionName) }
   }
 
   // ─── Layout ────────────────────────────────────────────

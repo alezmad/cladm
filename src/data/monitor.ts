@@ -59,7 +59,7 @@ function lastAssistantHasToolUse(filePath: string): boolean {
     const lines = tail.split("\n")
     // Walk backwards to find last assistant entry
     for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim()
+      const line = lines[i]?.trim()
       if (!line) continue
       // Quick pre-check before JSON.parse
       if (!line.includes('"assistant"')) continue
@@ -92,7 +92,7 @@ async function getTtyViaPsForPids(pids: string[]): Promise<Map<string, string>> 
     for (const line of text.split("\n")) {
       const parts = line.trim().split(/\s+/)
       if (parts.length >= 2) {
-        const pid = parts[0]
+        const pid = parts[0]!
         const tty = parts[1]
         if (tty && tty !== "??" && tty !== "-") {
           result.set(pid, `/dev/tty${tty}`)
@@ -393,6 +393,7 @@ export function populateMockSessionStatus(project: Project): void {
   const activeCount = Math.min(project.activeSessions, project.sessions.length)
   for (let i = 0; i < activeCount; i++) {
     const s = project.sessions[i]
+    if (!s) continue
     const isBusy = project.busySessions > 0 && i < project.busySessions
     entries.push({
       pid: `mock-${s.id}`,
@@ -462,6 +463,8 @@ export function generateMockActiveSessions(projects: Project[]): void {
   const shuffled = indices.sort(() => Math.random() - 0.5)
   const activeCount = Math.min(3 + Math.floor(Math.random() * 2), projects.length)
   for (let i = 0; i < activeCount; i++) {
-    projects[shuffled[i]].activeSessions = 1 + Math.floor(Math.random() * 2)
+    const idx = shuffled[i]
+    if (idx === undefined) continue
+    projects[idx]!.activeSessions = 1 + Math.floor(Math.random() * 2)
   }
 }

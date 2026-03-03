@@ -255,7 +255,7 @@ async function main() {
       if (app.directGrid && app.viewMode === "grid") {
         await refreshAlive()
         for (const [, s] of getSessions()) {
-          const status = getSessionStatus(s.projectPath, s.sessionId)
+          const status = s.sessionId ? getSessionStatus(s.projectPath, s.sessionId) : null
           if (status === "idle") app.directGrid.markIdle(s.name)
           else if (status === "busy") app.directGrid.markBusy(s.name)
           else app.directGrid.clearMark(s.name)

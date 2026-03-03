@@ -38,7 +38,7 @@ const DEFAULT_BG = RGBA.fromInts(0x1a, 0x1b, 0x26, 255)
 
 function color256(n: number): RGBA {
   if (n < 16) {
-    const [r, g, b] = ANSI_16[n]
+    const [r, g, b] = ANSI_16[n]!
     return RGBA.fromInts(r, g, b, 255)
   }
   if (n < 232) {
@@ -56,7 +56,7 @@ export function parseAnsiFrame(lines: string[], width: number, height: number): 
   const cells: TermCell[][] = []
 
   for (let row = 0; row < height; row++) {
-    const line = row < lines.length ? lines[row] : ""
+    const line = row < lines.length ? lines[row]! : ""
     const rowCells = parseLine(line, width)
     cells.push(rowCells)
   }
@@ -80,7 +80,7 @@ function parseLine(line: string, width: number): TermCell[] {
       let num = ""
 
       while (i < line.length) {
-        const ch = line[i]
+        const ch = line[i]!
         if (ch >= "0" && ch <= "9") {
           num += ch
           i++
@@ -101,7 +101,7 @@ function parseLine(line: string, width: number): TermCell[] {
       continue
     }
 
-    cells.push({ char: line[i], fg: currentFg, bg: currentBg, attrs: currentAttrs })
+    cells.push({ char: line[i]!, fg: currentFg, bg: currentBg, attrs: currentAttrs })
     col++
     i++
   }
@@ -139,45 +139,45 @@ function parseLine(line: string, width: number): TermCell[] {
         case 29: currentAttrs &= ~TextAttributes.STRIKETHROUGH; break
         // Foreground
         case 30: case 31: case 32: case 33: case 34: case 35: case 36: case 37: {
-          const [r, g, b] = ANSI_16[p - 30]
+          const [r, g, b] = ANSI_16[p - 30]!
           currentFg = RGBA.fromInts(r, g, b, 255)
           break
         }
         case 38:
           if (params[j + 1] === 5 && j + 2 < params.length) {
-            currentFg = color256(params[j + 2])
+            currentFg = color256(params[j + 2]!)
             j += 2
           } else if (params[j + 1] === 2 && j + 4 < params.length) {
-            currentFg = RGBA.fromInts(params[j + 2], params[j + 3], params[j + 4], 255)
+            currentFg = RGBA.fromInts(params[j + 2]!, params[j + 3]!, params[j + 4]!, 255)
             j += 4
           }
           break
         case 39: currentFg = DEFAULT_FG; break
         // Background
         case 40: case 41: case 42: case 43: case 44: case 45: case 46: case 47: {
-          const [r, g, b] = ANSI_16[p - 40]
+          const [r, g, b] = ANSI_16[p - 40]!
           currentBg = RGBA.fromInts(r, g, b, 255)
           break
         }
         case 48:
           if (params[j + 1] === 5 && j + 2 < params.length) {
-            currentBg = color256(params[j + 2])
+            currentBg = color256(params[j + 2]!)
             j += 2
           } else if (params[j + 1] === 2 && j + 4 < params.length) {
-            currentBg = RGBA.fromInts(params[j + 2], params[j + 3], params[j + 4], 255)
+            currentBg = RGBA.fromInts(params[j + 2]!, params[j + 3]!, params[j + 4]!, 255)
             j += 4
           }
           break
         case 49: currentBg = DEFAULT_BG; break
         // Bright foreground
         case 90: case 91: case 92: case 93: case 94: case 95: case 96: case 97: {
-          const [r, g, b] = ANSI_16[p - 90 + 8]
+          const [r, g, b] = ANSI_16[p - 90 + 8]!
           currentFg = RGBA.fromInts(r, g, b, 255)
           break
         }
         // Bright background
         case 100: case 101: case 102: case 103: case 104: case 105: case 106: case 107: {
-          const [r, g, b] = ANSI_16[p - 100 + 8]
+          const [r, g, b] = ANSI_16[p - 100 + 8]!
           currentBg = RGBA.fromInts(r, g, b, 255)
           break
         }

@@ -109,7 +109,7 @@ export class SessionGrid {
     const idx = this.panes.findIndex(p => p.session.name === sessionName)
     if (idx < 0) return
 
-    const pane = this.panes[idx]
+    const pane = this.panes[idx]!
     pane.termView.detach()
     this.container.remove(pane.borderBox.id)
     this.panes.splice(idx, 1)
@@ -344,7 +344,7 @@ export class SessionGrid {
 
   private updateBorders() {
     for (let i = 0; i < this.panes.length; i++) {
-      const pane = this.panes[i]
+      const pane = this.panes[i]!
       const isFocused = i === this._focusIndex
       const color = getProjectColor(pane.session.colorIndex)
 
@@ -381,7 +381,7 @@ export class SessionGrid {
 
     // For a proper grid, we'd need nested boxes. For now, use flex percentages.
     for (let i = 0; i < n; i++) {
-      const pane = this.panes[i]
+      const pane = this.panes[i]!
       pane.borderBox.width = `${Math.floor(100 / cols)}%`
       pane.borderBox.height = `${Math.floor(100 / rows)}%`
     }
