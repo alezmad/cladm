@@ -958,7 +958,7 @@ export class DirectGridRenderer {
 
     // Side borders for content rows + scrollbar on right border
     const scrollInfo = getScrollInfo(pane.session.name)
-    const hasScrollbar = scrollInfo !== null && scrollInfo.scrollbackLength > 0
+    const hasScrollbar = scrollInfo !== null && scrollInfo.offset > 0
     let thumbTop = 0, thumbSize = 0
     if (hasScrollbar) {
       const trackHeight = dp.height

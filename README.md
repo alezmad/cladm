@@ -176,9 +176,14 @@ cladm auto-detects project stacks by checking for common files:
 
 ## Tech stack
 
-- **Runtime**: [Bun](https://bun.sh)
-- **UI**: [@opentui/core](https://github.com/pekochan069/opentui) (terminal UI framework)
+- **Runtime**: [Bun](https://bun.sh) (>=1.3.0) — all shell commands, file I/O, process spawning via `Bun.$`, `Bun.spawn()`, `Bun.file()`
+- **UI Framework**: [@opentui/core](https://github.com/pekochan069/opentui) — imperative terminal UI (Box, Text, ScrollBox, Input, Select renderables + Yoga/flexbox layout)
 - **Language**: TypeScript
+- **Terminal rendering**: Raw ANSI escape sequences for the grid view (bypasses OpenTUI for direct cursor-addressed writes with synchronized output `?2026h`)
+- **PTY management**: Custom `pty-helper` binary (spawned via `Bun.spawn`) for real pseudo-terminal sessions
+- **macOS integration**: `osascript` for Terminal.app window/tab management, `open` for Finder/TextEdit
+- **Data sources**: `~/.claude/history.jsonl` (project discovery), `~/.claude/projects/*/*.jsonl` (usage/cost tracking), git CLI for metadata
+- **Layout engine**: Yoga (flexbox) via OpenTUI for the picker view; manual grid math for the PTY grid view
 
 ## License
 
